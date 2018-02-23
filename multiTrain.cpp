@@ -1,8 +1,6 @@
 #include "util.h"
 #include "multi.h"
 #include "SplitOracleActBCD.h"
-#include "SBCDsolve.h"
-#include "PostSolve.h"
 
 double overall_time = 0.0;
 
@@ -17,6 +15,9 @@ void exit_with_help(){
 	cerr << "	0 -- Stochastic Block Coordinate Descent" << endl;
 	cerr << "	1 -- Stochastic-Active Block Coordinate Descent (PD-Sparse)" << endl;
 	cerr << "-l lambda: L1 regularization weight (default 0.1)" << endl;
+	cerr << "-D decay: decay rate for step size (default 0.01)" << endl;
+	cerr << "-k precision@k: For Training  (default 1)" << endl;
+
 	cerr << "-c cost: cost of each sample (default 1.0)" << endl;
 	cerr << "-r speed_up_rate: sample 1/r fraction of non-zero features to estimate gradient (default r = ceil(min( 5DK/(Clog(K)nnz(X)), nnz(X)/(5N) )) )" << endl;
 	cerr << "-q split_up_rate: divide all classes into q disjoint subsets (default 1)" << endl;
@@ -45,9 +46,13 @@ void parse_cmd_line(int argc, char** argv, Param* param){
 				  break;
 			case 'l': param->lambda = atof(argv[i]);
 				  break;
+			case 'D': param->decay = atof(argv[i]);
+				  break;
 			case 'c': param->C = atof(argv[i]);
 				  break;
 			case 'r': param->speed_up_rate = atoi(argv[i]);
+				  break;
+			case 'k': param->precision = atoi(argv[i]);
 				  break;
 			case 'q': param->split_up_rate = atoi(argv[i]);
 				  break;
@@ -117,9 +122,11 @@ int main(int argc, char** argv){
 		
 	if( param->solver == 0 ){
 		
+/*
 		SBCDsolve* solver = new SBCDsolve(param);
 		Model* model = solver->solve();
 		model->writeModel(param->modelFname);
+*/
 	
 	}else if( param->solver==1 ){
 		SplitOracleActBCD* solver = new SplitOracleActBCD(param);
@@ -128,6 +135,7 @@ int main(int argc, char** argv){
 		
 		if( param->post_solve_iter > 0 ){
 			
+/*
 			param->post_solve_iter = min(solver->iter, param->post_solve_iter);
 			#ifdef USING_HASHVEC
 			PostSolve* postSolve = new PostSolve( param, model->w_hash_nnz_index, model->w, model->size_w, solver->act_k_index, solver->hashindices );
@@ -140,6 +148,7 @@ int main(int argc, char** argv){
 			sprintf(postsolved_modelFname, "%s.p", param->modelFname);
 			model->writeModel(postsolved_modelFname);
 			delete[] postsolved_modelFname;
+*/
 		}
 	}
 	

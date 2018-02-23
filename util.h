@@ -122,6 +122,57 @@ double norm_sq( double* v, int size ){
 	return sum;
 }
 
+/*
+ * Function to compare if two combinations of labels are equal
+ * Requires both of them to be sorted (in same order)
+ * @param y: input vector<int>
+ * @param ybar: input vector<int>
+ * @return true, if y==ybar
+ * 		   false, otherwise
+ */
+bool compare_combinations(Labels* y, Labels* ybar){
+	if(y->size()!=ybar->size())
+		return false;
+	int it1=0;
+	while(it1<y->size()){
+		if(ybar->at(it1)!=y->at(it1))
+			return false;
+		it1++;
+	}
+	return true;
+}
+/*
+ * Generate all possible combinations of size k from n
+ * @param ans: vector of vectors to store the subsets of size k
+ * @param tmp: vector<int> to store the current subset (must be initially empty )
+ * @param left: index to start from
+ * @param k: size of the desired subset size
+ * @param yi: vector<int>* set from which k size subsets are to be chosen
+ * @return None
+ */
+void makeCombiUtil(vector<pair<Labels*,Float>>& ans,
+    vector<int>& tmp, int left, int k, Labels* yi)
+{
+    // Pushing this vector to a vector of vector
+    if (k == 0) {
+    	Labels *ybar= new Labels(tmp.begin(),tmp.end());
+        ans.push_back(make_pair(ybar,0.0));
+        return;
+    }
+
+    // i iterates from left to n. First time
+    // left will be 1
+    for (int i = left; i < yi->size(); ++i)
+    {
+        tmp.push_back(yi->at(i));
+        makeCombiUtil(ans, tmp, i + 1, k - 1, yi);
+
+        // Popping out last inserted element
+        // from the vector
+        tmp.pop_back();
+    }
+}
+
 int total_size( vector<int>* alpha, int size ){
 	
 	int sum = 0;

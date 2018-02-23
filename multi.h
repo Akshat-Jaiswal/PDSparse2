@@ -227,6 +227,8 @@ class Param{
 	char* heldoutFname;
 	Float lambda; //for L1-norm (default 1/N)
 	Float C; //weight of loss
+	int precision; // for precision@k training
+	Float decay; // decay rate for step size computation
 	int speed_up_rate; // speed up rate for sampling
 	int split_up_rate; // split up [K] into a number of subsets	
 	Problem* train;
@@ -244,6 +246,8 @@ class Param{
 		solver = 1;
 		lambda = 0.1;
 		C = 1.0;
+		precision=1;
+		decay=0.01;
 		max_iter = 50;
 		max_select = -1;
 		speed_up_rate = -1;
@@ -422,6 +426,8 @@ void readData(char* fname, Problem* prob)
 		}
 		
 		prob->data.push_back(ins);
+		// sort before pushing them
+		sort(lab_indices.begin(),lab_indices.end());
 		prob->labels.push_back(lab_indices);
 	}
 	fin.close();
