@@ -958,15 +958,19 @@ class SplitOracleActBCD{
     				wjk = vj[index_v].second.second;
     #else
     				wjk = vj[k].second;
-    				if (wjk == 0.0) {
-    					*it2 = *(wjS.end() - 1);
-    					wjS.erase(wjS.end() - 1);
-    					it2--;
-    					continue;
-    				}
     #endif
+                    if (wjk == 0.0 || inside[k]){
+                        *it2=*(wjS.end()-1); 
+                        wjS.erase(wjS.end()-1); 
+                        it2--;
+                        continue;
+                    }
+                    inside[k] = true;
     				prod_cache[k] += wjk * xij;
     			}
+    			for (vector<int>::iterator it2 = wjS.begin(); it2 != wjS.end(); it2++){
+                    inside[*it2] = false;
+                }
 
     		}
     		Labels *ybar=new Labels();
