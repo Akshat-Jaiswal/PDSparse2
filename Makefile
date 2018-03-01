@@ -3,13 +3,13 @@ all: multiTrain multiPred
 #.PHONY: multiTrain multiTrainHash multiPred
 
 multiTrain:
-	g++ -fopenmp -std=c++11 -O3 -o multiTrain multiTrain.cpp
+	g++ -fopenmp -g -std=c++11 -O3 -o multiTrain multiTrain.cpp
 
 multiTrainHash:	
-	g++ -fopenmp -std=c++11 -O3 -o multiTrainHash multiTrain.cpp -DUSING_HASHVEC
+	g++ -fopenmp -g -std=c++11 -O3 -o multiTrainHash multiTrain.cpp -DUSING_HASHVEC
 	
 multiPred:
-	g++ -fopenmp -std=c++11 -O3 -o multiPred multiPred.cpp
+	g++ -fopenmp -g -std=c++11 -O3 -o multiPred multiPred.cpp
 
 clean:
 	rm -f multiTrain
@@ -34,7 +34,7 @@ LSHTCwiki_original: examples/$$@/
 
 rcv1_regions:  examples/$$@/
 	$(eval base := examples/$@/$@)
-	make train_without_hash train_file=$(base).train heldout_file=$(base).heldout test_file=$(base).test split_up_rate="-q 3" 
+	make train_without_hash train_file=$(base).train heldout_file=$(base).heldout test_file=$(base).test split_up_rate="-q 1" 
 
 bibtex: examples/$$@/
 	$(eval base := examples/$@/$@)

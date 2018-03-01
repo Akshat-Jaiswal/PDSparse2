@@ -141,6 +141,48 @@ bool compare_combinations(Labels* y, Labels* ybar){
 	}
 	return true;
 }
+class hasher{
+	public:
+	std::size_t operator()(std::vector<int> &vec) const{
+		  std::size_t seed = vec.size();
+		  for(vector<int>::iterator i =vec.begin();i!=vec.end();++i) {
+		    seed ^= *i + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+		  }
+		  return seed;
+	}
+};
+void display(std::vector<int> const &vec){
+	cout<<" (";
+	for(auto elem: vec)
+		cout<<elem<<" ";
+	cout<<") ";
+}
+template <class RandomAccessIterator>
+void insertion_sort (RandomAccessIterator first, RandomAccessIterator last){
+   RandomAccessIterator i,j;
+   for (i = first; i != last; i++)
+   {
+       j = i-1; 
+       while (j >= first && *(j+1)<*j)
+       {
+			iter_swap(j,j+1);  
+			j=j-1;
+       }
+   }
+}
+template <class RandomAccessIterator,class Compare>
+void insertion_sort (RandomAccessIterator first, RandomAccessIterator last, Compare comp){
+   RandomAccessIterator i,j;
+   for (i = first; i != last; i++)
+   {
+       j = i-1; 
+       while (j >= first && comp(*(j+1),*j))
+       {
+			iter_swap(j,j+1);  
+			j=j-1;
+       }
+   }
+}
 /*
  * Generate all possible combinations of size k from n
  * @param ans: vector of vectors to store the subsets of size k

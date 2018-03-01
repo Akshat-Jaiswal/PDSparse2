@@ -4,6 +4,8 @@
 #include <iomanip>
 #include <cassert>
 #include <map>
+#include <unordered_set>
+using namespace std;
 #define loc(k) k*split_up_rate/K
 
 extern double overall_time;
@@ -973,67 +975,77 @@ class SplitOracleActBCD{
                 }
 
     		}
-    		Labels *ybar=new Labels();
     		int k=precision<yi->size()?precision:yi->size();
     		int *max_indices;
             // now find  k(precision@k) maximums from negative ones
             max_indices=new int[K];
             for(int i=0;i<K;++i){
             	max_indices[i]=i;
-            	prod[i]=prod_cache[i];
             }
-            // set the potentials for labels which are in currently active set to -INFI
-            // so that they won't get selected
-            for(vector<pair<Labels*, Float>>::iterator it = act_k_neg_index.begin();
-            		it != act_k_neg_index.end(); it++){
-            	for(Labels::iterator it2=it->first->begin();
-            			it2!=it->first->end();++it2)
-                	prod[*it2] = -INFI;
+            // create a set to hold the hash current hashes
+            unordered_set<long long> actives;
+            //now compute hashes of all the sets in active set
+            hasher gethash;
+            for (vector<pair<Labels*, Float>>::iterator it =
+                    act_k_neg_index.begin(); it != act_k_neg_index.end(); ++it) {
+                long long hash=gethash(*(it->first));
+                actives.insert(hash);
             }
-            /*
-            for (Labels::iterator it = yi->begin(); it != yi->end(); it++){
-                prod[*it] = -INFI;
+            for (vector<pair<Labels*, Float>>::iterator it =
+                act_k_pos_index.begin(); it != act_k_pos_index.end(); ++it) {
+                long long hash=gethash(*(it->first));
+                actives.insert(hash);
             }
-             */
 
-    		nth_element(max_indices, max_indices+yi->size()+1, max_indices+K, ScoreComp(prod));
-    		sort(max_indices, max_indices+yi->size()+1, ScoreComp(prod));
-    		bool flag=true;
-    		// now push k-1 entries directly into ybar
-    		for(int i=0;i<k-1;++i){
-    			ybar->push_back(max_indices[i]);
-    			flag&= binary_search(yi->begin(),yi->end(),max_indices[i]);
-    		}
-    		// if all of them are present in ground truth configuration
-    		// then find the first negative in the sorted order and add to ybar
-    		if(!flag){
-    			// this means their is already a negative label in current configuration
-    			// therefore just add the next one into it
-    			ybar->push_back(max_indices[k-1]);
-    		}
-    		else{
-    			//find the first negative
-    			for(int i=k-1;i<yi->size()+1;++i){
-    				if(!binary_search(yi->begin(),yi->end(),max_indices[i])){
-    					ybar->push_back(max_indices[i]);
-    					break;
-    				}
-    			}
-    		}
-    		delete[] max_indices;
-    		flag=true;
-    		sort(ybar->begin(),ybar->end());
-    		flag=true;
-    		for (vector<pair<Labels*, Float>>::iterator it =
-    				act_k_neg_index.begin(); it != act_k_neg_index.end(); ++it) {
-    			if (compare_combinations(it->first, ybar)) {
-    				flag = false;
-    				break;
-    			}
-    		}
-    		if (flag) {
-    			act_k_neg_index.push_back(make_pair(ybar, 0.0));
-    		}
+            // now need to partially sort on the basis of scores
+            int partial_length=yi->size()+ k*act_k_neg_index.size() +1;
+            partial_length= partial_length<K? partial_length:K;
+    		nth_element(max_indices, max_indices+partial_length, max_indices+K, ScoreComp(prod_cache));
+    		sort(max_indices, max_indices+partial_length, ScoreComp(prod_cache));
+
+            // now declare vectors to store incremental sets
+            vector<vector<int>> level[k];
+            bool found=false;
+            for(int i=0;i<partial_length && ! found;++i){
+                // iterate from last level to second
+                for(int j=k-1;j>0;--j){
+                    //pick elements to j-1 level and append to each j-1 level a[i]
+                    for(auto elem:level[j-1]){
+                        // create a new vector and add it to level j
+                        vector<int> newconfig(elem.begin(),elem.end());
+                        newconfig.push_back(max_indices[i]);
+                        if(j==k-1){
+                            //check if this new configuration is already in set
+                            // if not then add and break
+                            long long hash= gethash(newconfig);
+                            if(actives.find(hash)==actives.end()){
+                                Labels* ybar=new vector<int>(newconfig.begin(),newconfig.end());
+                                // add this to active set
+                                act_k_neg_index.push_back(make_pair(ybar,0.0));
+                                found=true;
+                                break;
+                            }
+                            // else do nothing
+                        }
+                        else
+                        level[j].push_back(newconfig);
+                    }
+                }
+                // add these to first level
+                vector<int> newconfig(1,max_indices[i]);
+                if(k==1){
+                    long long hash= gethash(newconfig);
+                        if(actives.find(hash)==actives.end()){
+                            Labels* ybar=new vector<int>(newconfig.begin(),newconfig.end());
+                                // add this to active set
+                            act_k_neg_index.push_back(make_pair(ybar,0.0));
+                            found=true;
+                            break;
+                        }
+                }
+                else
+                level[0].push_back(newconfig);
+            }
     	}
 
         //store the best model as well as necessary indices
