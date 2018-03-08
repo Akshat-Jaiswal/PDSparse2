@@ -20,6 +20,7 @@ class SplitOracleActBCD{
             data = &(train->data);
             labels = &(train->labels);
             lambda = param->lambda;
+            C2=param->C2;
             C = param->C;
             precision=param->precision;
             decay_rate=param->decay;
@@ -94,7 +95,6 @@ class SplitOracleActBCD{
             for(int j=0;j<D;j++)
                 delete[] v[j];
             delete[] v;
-            delete[] ve;
 
             for(int j=0;j<D;j++)
                 delete[] w[j];
@@ -167,11 +167,10 @@ class SplitOracleActBCD{
                 memset(w[j], 0.0, sizeof(Float)*K);
             }
 #endif
-
-    		// dense vector for storing edge parameters
-    		ve = new pair<Float, Float> [K * (K - 1) / 2];
-    		for (int i = 0; i < K * (K - 1) / 2; ++i)
-    			ve[i] = make_pair(0.0, 0.0);
+			ve = new pair<Float, Float> [K * (K - 1) / 2];
+			for (int k = 0; k < K * (K - 1) / 2; k++) {
+				ve[k] = make_pair(0.0, 0.0);
+			}
 
             //initialize non-zero index array w
             w_hash_nnz_index = new vector<int>*[D];
@@ -181,7 +180,6 @@ class SplitOracleActBCD{
                     w_hash_nnz_index[j][S].clear();
                 }
             }
-
             //initialize Q_diag (Q=X*X') for the diagonal Hessian of each i-th subproblem
             Q_diag = new Float[N];
             for(int i=0;i<N;i++){
@@ -249,7 +247,6 @@ class SplitOracleActBCD{
                     else
                         search_active_i_uniform(i, act_k_index_neg[i]);
 */
-
                     search_active_i_graph(i,act_k_index_pos[i],act_k_index_neg[i]);
                     search_time += omp_get_wtime();
                     //solve subproblem
@@ -275,10 +272,20 @@ class SplitOracleActBCD{
     					delta_alpha = alpha_i_new_pos[ind++] - it->second;
     					for (Labels::iterator it2 = it->first->begin();
     							it2 != it->first->end(); ++it2) {
+    						// update node parameter
     						if (actives.find(*it2) == actives.end()) {
     							actives[*it2] = 0;
     						}
     						actives[*it2] += delta_alpha;
+    						// update edge parameters
+    						for(Labels::iterator it3=it->first->begin();
+    								it3!=it2;++it3){
+								int index = locate(*it2, *it3);
+								if (actives.find(index) == actives.end()) {
+									actives[index] = 0;
+								}
+								actives[index] += delta_alpha;
+    						}
     					}
     				}
     				// identify active labels for update from negatives
@@ -289,10 +296,20 @@ class SplitOracleActBCD{
     					delta_alpha = alpha_i_new_neg[ind++] - it->second;
     					for (Labels::iterator it2 = it->first->begin();
     							it2 != it->first->end(); ++it2) {
+    						// update node parameter
     						if (actives.find(*it2) == actives.end()) {
     							actives[*it2] = 0;
     						}
     						actives[*it2] += delta_alpha;
+    						// update edge parameters
+    						for(Labels::iterator it3=it->first->begin();
+    								it3!=it2;++it3){
+								int index = locate(*it2, *it3);
+								if (actives.find(index) == actives.end()) {
+									actives[index] = 0;
+								}
+								actives[index] += delta_alpha;
+    						}
     					}
     				}
 
@@ -309,6 +326,9 @@ class SplitOracleActBCD{
     					for (std::map<int, Float>::iterator it2 = actives.begin();
     							it2 != actives.end(); it2++) {
     						int k = it2->first;
+    						// that means we have reached the edge parameters
+    						if(k>=K)
+    							break;
     						Float delta_alpha = it2->second;
                             if( fabs(delta_alpha) < EPS )
                                 continue;
@@ -337,9 +357,9 @@ class SplitOracleActBCD{
     					for (std::map<int, Float>::iterator it2 = actives.begin();
     							it2 != actives.end(); it2++) {
     						k = it2->first;
-    						// edge parameters reached
+    						// that means we have reached edge parameters
     						if(k>=K)
-    							continue;
+    							break;
     						Float delta_alpha = it2->second;
     						if (fabs(delta_alpha) < EPS)
     							continue;
@@ -358,28 +378,20 @@ class SplitOracleActBCD{
 #endif
                     }
     				std::map<int, Float>::iterator itx;
-    				// now we need to update the edge primal parameters
-    				for (itx = actives.lower_bound(K); itx != actives.end();
-    						++itx) {
-    					int k = itx->first;
-    					k -= K;	// remove the offset
-    					delta_alpha = itx->second;
-    					if (fabs(delta_alpha) < EPS)
-    						continue;
-    					pair<Float, Float> vk_Ek = ve[k];
-    					Float vk = vk_Ek.first + delta_alpha;
-    					Float Ek = prox_l1_nneg(vk, C);
-    					Float Ek_old = vk_Ek.second;
-    					ve[k] = make_pair(vk, Ek);
-/*
-    					if (Ek_old != Ek) {
-    						if (fabs(Ek_old) < EPS) {
-    							// always be zero since we are having 1 split up rate
-    							e_hash_nnz_index[0].push_back(k);
-    						}
-    					}
-*/
-    				}
+                    // now we need to update the edge primal parameters
+                    				for (itx = actives.lower_bound(K); itx != actives.end();
+                    						++itx) {
+                    					int k = itx->first;
+                    					k -= K;	// remove the offset
+                    					delta_alpha = itx->second;
+                    					if (fabs(delta_alpha) < EPS)
+                    						continue;
+                    					pair<Float, Float> vk_Ek = ve[k];
+                    					Float vk = vk_Ek.first + delta_alpha;
+                    					Float Ek = prox_l1_nneg(vk, C2);
+                    					Float Ek_old = vk_Ek.second;
+                    					ve[k] = make_pair(vk, Ek);
+                    				}
     				//update alpha
     				bool has_zero = 0;
     				ind = 0;
@@ -476,7 +488,6 @@ class SplitOracleActBCD{
                         cerr << "(" << (++terminate_countdown) << "/" << early_terminate << ")";
                         if (terminate_countdown == early_terminate){
                             overall_time -= omp_get_wtime();
-                            // so that it is written to disk
                             best_model=NULL;
                             break;
                         }
@@ -496,7 +507,6 @@ class SplitOracleActBCD{
                 for (int i = 0; i < N; i++){
                     act_k_index_neg[i] = best_act_k_index_neg[i];
                     act_k_index_pos[i] = best_act_k_index_pos[i];
-
                 }
             }
 */
@@ -561,11 +571,12 @@ class SplitOracleActBCD{
                     }
                 }
             }
-            // add edge weights
-            for (int i = 0; i < K * (K - 1) / 2; ++i) {
-            	dual_obj += ve[i].second * ve[i].second;
-            	//	cerr<<ve[i].second<<" ";
-            }
+            Float edges=0.0;
+           	for(int i=0;i< K*(K-1)/2;++i){
+           		dual_obj+=ve[i].second*ve[i].second;
+           		edges+=ve[i].second*ve[i].second;
+           	}
+           	cerr<<"Edges: "<<edges<<" ";
             dual_obj /= 2.0;
     		for (int i = 0; i < N; i++) {
     			vector<pair<Labels*,Float>>& act_index = act_k_index_neg[i];
@@ -603,11 +614,13 @@ class SplitOracleActBCD{
     			c[j] = A * alpha_ik;
     			for (Labels::iterator it = k->begin();
     					it != k->end(); ++it) {
-    				if(*it<K)
-    					c[j] -= prod_cache[*it];
-    				else
-    					c[j] -= ve[*it].second;
-
+    				// for edge parameters
+    				for(Labels::iterator it2 = k->begin();
+    						it2!=it;++it2){
+    					int index=locate(*it,*it2);
+    					c[j]-=ve[index].second;
+    				}
+    				c[j] -= prod_cache[*it];
     			}
     			c[j++] /= A;
 
@@ -620,10 +633,13 @@ class SplitOracleActBCD{
     			b[i] = 1.0 - A * alpha_ik;
     			for (Labels::iterator it = k->begin();
     					it != k->end(); ++it) {
-    				if(*it<K)
-    					b[i] += prod_cache[*it];
-    				else
-    					b[i] += ve[*it].second;
+    				// for edge parameters
+    				for(Labels::iterator it2 = k->begin();
+    						it2!=it;++it2){
+    					int index=locate(*it,*it2);
+    					b[i]+=ve[index].second;
+    				}
+    				b[i] += prod_cache[*it];
     			}
     			b[i++] /= A;
 
@@ -1054,9 +1070,8 @@ class SplitOracleActBCD{
 
             // now declare vectors to store incremental sets
             vector<pair<vector<int>,Float>> level[k];
-            bool found=false;
             Float score;
-            int index;
+            bool found=false;
             for(int i=0;i<partial_length && ! found;++i){
                 // iterate from last level to second
                 for(int j=k-1;j>0;--j){
@@ -1064,51 +1079,38 @@ class SplitOracleActBCD{
                     for(auto elem:level[j-1]){
                         // create a new vector and add it to level j
                         vector<int> newconfig(elem.first.begin(),elem.first.end());
-                        score=elem.second;
-
                         newconfig.push_back(max_indices[i]);
-                        // run the last iteration of insertion sort
-                        int p=newconfig.size()-2;
-                        int key=max_indices[i];
-                        while(p>=0 && newconfig[p]>key){
-                            newconfig[p+1]=newconfig[p];
-                            p=p-1;
-                        }
-                        newconfig[p+1]=key;
                         if(j==k-1){
                             //check if this new configuration is already in set
                             // if not then add and break
                             long long hash= gethash(newconfig);
                             if(actives.find(hash)==actives.end()){
                                 Labels* ybar=new vector<int>(newconfig.begin(),newconfig.end());
-                                // now compute the new score after adding edges
-                                for(auto l:elem.first){
-                                	index=locate(l,max_indices[i]);
-                                	//score+=ve[index].second;
-                                	ybar->push_back(K+index);
-                                }
                                 // add this to active set
                                 act_k_neg_index.push_back(make_pair(ybar,0.0));
-
                                 found=true;
                                 break;
                             }
                             // else do nothing
                         }
-                        else {
-                        	for (auto l : elem.first) {
-								index = locate(l, max_indices[i]);
-								score += ve[index].second;
-								newconfig.push_back(K + index);
+                        else{
+                        	// compute the score of new configuration
+
+                        	score=elem.second; // previous score
+                        	score+=prod_cache[max_indices[i]]; // new node score
+                        	// new edges score
+                        	for(auto l:elem.first){
+                        		int index=locate(l,max_indices[i]);
+                        		score+=ve[index].second;
                         	}
-							level[j].push_back(make_pair(newconfig, score));
-							// use last iteration of insertion sort
-							int p = level[j].size() - 2;
-							pair<vector<int>, float> key = level[j].back();
-							while (p >= 0 && level[j][p].second < key.second) {
-								std::swap(level[j][p], level[j][p + 1]);
-								p = p - 1;
-							}
+                        	level[j].push_back(make_pair(newconfig,score));
+                        	// now run the last iteration of insertion sort
+                        	// to sort according to the scores in desc order
+                        	int p=level[j].size()-2;
+                        	while(p>=0 && level[j][p].second<level[j][p+1].second){
+                        		swap(level[j][p],level[j][p+1]);
+                        		p=p-1;
+                        	}
                         }
                     }
                 }
@@ -1125,20 +1127,30 @@ class SplitOracleActBCD{
                         }
                 }
                 else{
-            		score=max_indices[i];
-            		level[0].push_back(make_pair(newconfig,score));
-                			int p=level[0].size()-2;
-                	        pair<vector<int>,float> key=level[0].back();
-                	        while(p>=0 && level[0][p].second<key.second){
-                	            std::swap(level[0][p],level[0][p+1]);
-                	            p=p-1;
-                	        }
+					score = prod_cache[max_indices[i]]; // new node score
+					// new edges score
+					// no new edges score
+					level[0].push_back(make_pair(newconfig, score));
+					// now run the last iteration of insertion sort
+					// to sort according to the scores in desc order
+					int p = level[0].size() - 2;
+					while (p >= 0 && level[0][p].second < level[0][p + 1].second) {
+						swap(level[0][p], level[0][p + 1]);
+						p = p - 1;
+					}
                 }
             }
     	}
 
         //store the best model as well as necessary indices
         void store_best_model(bool edges=false){
+            SparseVec E;
+            if(edges){
+            	for(int i=0;i< K*(K-1)/2;++i)
+            		if(ve[i].second!=0.0)
+            			E.push_back(make_pair(i,ve[i].second));
+            }
+
 #ifdef USING_HASHVEC
             memset(inside, false, sizeof(bool)*K);
             for (int j = 0; j < D; j++){
@@ -1177,15 +1189,7 @@ class SplitOracleActBCD{
                     inside[k] = false;
                 }
             }
-            // write down Edges when saving the model to disk
-            SparseVec E;
-            if(edges){
-            	for(int i=0;i<K*(K-1)/2;++i){
-            		if(ve[i].second!=0.0)
-            			E.push_back(make_pair(i,ve[i].second));
-            	}
-            }
-            best_model = new Model(train, non_split_index, w, size_w, hashindices, E);
+            best_model = new Model(train, non_split_index, w, size_w, hashindices,E);
 #else
             for (int j = 0; j < D; j++){
                 for (vector<int>::iterator it = non_split_index[j].begin(); it != non_split_index[j].end(); it++){
@@ -1214,16 +1218,7 @@ class SplitOracleActBCD{
                     inside[k] = false;
                 }
             }
-
-            // write down Edges when saving the model to disk
-            SparseVec E;
-            if(edges){
-            	for(int i=0;i<K*(K-1)/2;++i){
-            		if(ve[i].second!=0.0)
-            			E.push_back(make_pair(i,ve[i].second));
-            	}
-            }
-            best_model = new Model(train, non_split_index, w, E);
+            best_model = new Model(train, non_split_index, w,E);
 #endif		
 /*
             if (best_act_k_index == NULL)
@@ -1239,7 +1234,7 @@ class SplitOracleActBCD{
         Problem* train;
         HeldoutEval* heldoutEval;
         Float lambda;
-        Float C;
+        Float C,C2;
         vector<SparseVec*>* data;
         vector<Labels>* labels;
         int D; 
@@ -1252,6 +1247,7 @@ class SplitOracleActBCD{
         vector<Float>* cdf_sum;
         HashVec** w_temp;
         vector<int>** w_hash_nnz_index;
+
         int max_iter;
         vector<int>* k_index;
 
@@ -1312,4 +1308,5 @@ class SplitOracleActBCD{
         pair<Float, Float>** best_v;
 #endif
         pair<Float, Float>* ve;
+
 };

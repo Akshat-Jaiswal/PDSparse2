@@ -50,6 +50,8 @@ void parse_cmd_line(int argc, char** argv, Param* param){
 				  break;
 			case 'c': param->C = atof(argv[i]);
 				  break;
+			case 'C': param->C2 = atof(argv[i]);
+				  break;
 			case 'r': param->speed_up_rate = atoi(argv[i]);
 				  break;
 			case 'k': param->precision = atoi(argv[i]);
