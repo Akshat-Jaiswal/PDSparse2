@@ -100,6 +100,7 @@ double prox_l1_nneg( double v, double lambda ){
 	return v-lambda;
 }
 
+
 inline Float prox_l1( Float v, Float lambda ){
 	
 	if( fabs(v) > lambda ){
@@ -111,7 +112,12 @@ inline Float prox_l1( Float v, Float lambda ){
 	
 	return 0.0;
 }
-
+// helper function to locate the edge index
+int locate(int p, int q) {
+		int i = p > q ? p : q;
+		int j = p + q - i;
+		return (i * (i - 1) / 2 + j);
+}
 double norm_sq( double* v, int size ){
 
 	double sum = 0.0;

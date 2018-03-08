@@ -94,6 +94,7 @@ class SplitOracleActBCD{
             for(int j=0;j<D;j++)
                 delete[] v[j];
             delete[] v;
+            delete[] ve;
 
             for(int j=0;j<D;j++)
                 delete[] w[j];
@@ -166,6 +167,12 @@ class SplitOracleActBCD{
                 memset(w[j], 0.0, sizeof(Float)*K);
             }
 #endif
+
+    		// dense vector for storing edge parameters
+    		ve = new pair<Float, Float> [K * (K - 1) / 2];
+    		for (int i = 0; i < K * (K - 1) / 2; ++i)
+    			ve[i] = make_pair(0.0, 0.0);
+
             //initialize non-zero index array w
             w_hash_nnz_index = new vector<int>*[D];
             for(int j=0;j<D;j++){
@@ -174,6 +181,7 @@ class SplitOracleActBCD{
                     w_hash_nnz_index[j][S].clear();
                 }
             }
+
             //initialize Q_diag (Q=X*X') for the diagonal Hessian of each i-th subproblem
             Q_diag = new Float[N];
             for(int i=0;i<N;i++){
@@ -241,6 +249,7 @@ class SplitOracleActBCD{
                     else
                         search_active_i_uniform(i, act_k_index_neg[i]);
 */
+
                     search_active_i_graph(i,act_k_index_pos[i],act_k_index_neg[i]);
                     search_time += omp_get_wtime();
                     //solve subproblem
@@ -328,6 +337,9 @@ class SplitOracleActBCD{
     					for (std::map<int, Float>::iterator it2 = actives.begin();
     							it2 != actives.end(); it2++) {
     						k = it2->first;
+    						// edge parameters reached
+    						if(k>=K)
+    							continue;
     						Float delta_alpha = it2->second;
     						if (fabs(delta_alpha) < EPS)
     							continue;
@@ -345,6 +357,29 @@ class SplitOracleActBCD{
     					}
 #endif
                     }
+    				std::map<int, Float>::iterator itx;
+    				// now we need to update the edge primal parameters
+    				for (itx = actives.lower_bound(K); itx != actives.end();
+    						++itx) {
+    					int k = itx->first;
+    					k -= K;	// remove the offset
+    					delta_alpha = itx->second;
+    					if (fabs(delta_alpha) < EPS)
+    						continue;
+    					pair<Float, Float> vk_Ek = ve[k];
+    					Float vk = vk_Ek.first + delta_alpha;
+    					Float Ek = prox_l1_nneg(vk, C);
+    					Float Ek_old = vk_Ek.second;
+    					ve[k] = make_pair(vk, Ek);
+/*
+    					if (Ek_old != Ek) {
+    						if (fabs(Ek_old) < EPS) {
+    							// always be zero since we are having 1 split up rate
+    							e_hash_nnz_index[0].push_back(k);
+    						}
+    					}
+*/
+    				}
     				//update alpha
     				bool has_zero = 0;
     				ind = 0;
@@ -524,6 +559,11 @@ class SplitOracleActBCD{
                     }
                 }
             }
+            // add edge weights
+            for (int i = 0; i < K * (K - 1) / 2; ++i) {
+            	dual_obj += ve[i].second * ve[i].second;
+            	//	cerr<<ve[i].second<<" ";
+            }
             dual_obj /= 2.0;
     		for (int i = 0; i < N; i++) {
     			vector<pair<Labels*,Float>>& act_index = act_k_index_neg[i];
@@ -561,7 +601,11 @@ class SplitOracleActBCD{
     			c[j] = A * alpha_ik;
     			for (Labels::iterator it = k->begin();
     					it != k->end(); ++it) {
-    				c[j] -= prod_cache[*it];
+    				if(*it<K)
+    					c[j] -= prod_cache[*it];
+    				else
+    					c[j] -= ve[*it].second;
+
     			}
     			c[j++] /= A;
 
@@ -574,7 +618,10 @@ class SplitOracleActBCD{
     			b[i] = 1.0 - A * alpha_ik;
     			for (Labels::iterator it = k->begin();
     					it != k->end(); ++it) {
-    				b[i] += prod_cache[*it];
+    				if(*it<K)
+    					b[i] += prod_cache[*it];
+    				else
+    					b[i] += ve[*it].second;
     			}
     			b[i++] /= A;
 
@@ -1004,31 +1051,63 @@ class SplitOracleActBCD{
     		sort(max_indices, max_indices+partial_length, ScoreComp(prod_cache));
 
             // now declare vectors to store incremental sets
-            vector<vector<int>> level[k];
+            vector<pair<vector<int>,Float>> level[k];
             bool found=false;
+            Float score;
+            int index;
             for(int i=0;i<partial_length && ! found;++i){
                 // iterate from last level to second
                 for(int j=k-1;j>0;--j){
                     //pick elements to j-1 level and append to each j-1 level a[i]
                     for(auto elem:level[j-1]){
                         // create a new vector and add it to level j
-                        vector<int> newconfig(elem.begin(),elem.end());
+                        vector<int> newconfig(elem.first.begin(),elem.first.end());
+                        score=elem.second;
+
                         newconfig.push_back(max_indices[i]);
+                        // run the last iteration of insertion sort
+                        int p=newconfig.size()-2;
+                        int key=max_indices[i];
+                        while(p>=0 && newconfig[p]>key){
+                            newconfig[p+1]=newconfig[p];
+                            p=p-1;
+                        }
+                        newconfig[p+1]=key;
                         if(j==k-1){
                             //check if this new configuration is already in set
                             // if not then add and break
                             long long hash= gethash(newconfig);
                             if(actives.find(hash)==actives.end()){
                                 Labels* ybar=new vector<int>(newconfig.begin(),newconfig.end());
+                                // now compute the new score after adding edges
+                                for(auto l:elem.first){
+                                	index=locate(l,max_indices[i]);
+                                	//score+=ve[index].second;
+                                	ybar->push_back(K+index);
+                                }
                                 // add this to active set
                                 act_k_neg_index.push_back(make_pair(ybar,0.0));
+
                                 found=true;
                                 break;
                             }
                             // else do nothing
                         }
-                        else
-                        level[j].push_back(newconfig);
+                        else {
+                        	for (auto l : elem.first) {
+								index = locate(l, max_indices[i]);
+								score += ve[index].second;
+								newconfig.push_back(K + index);
+                        	}
+							level[j].push_back(make_pair(newconfig, score));
+							// use last iteration of insertion sort
+							int p = level[j].size() - 2;
+							pair<vector<int>, float> key = level[j].back();
+							while (p >= 0 && level[j][p].second < key.second) {
+								std::swap(level[j][p], level[j][p + 1]);
+								p = p - 1;
+							}
+                        }
                     }
                 }
                 // add these to first level
@@ -1043,13 +1122,21 @@ class SplitOracleActBCD{
                             break;
                         }
                 }
-                else
-                level[0].push_back(newconfig);
+                else{
+            		score=max_indices[i];
+            		level[0].push_back(make_pair(newconfig,score));
+                			int p=level[0].size()-2;
+                	        pair<vector<int>,float> key=level[0].back();
+                	        while(p>=0 && level[0][p].second<key.second){
+                	            std::swap(level[0][p],level[0][p+1]);
+                	            p=p-1;
+                	        }
+                }
             }
     	}
 
         //store the best model as well as necessary indices
-        void store_best_model(){
+        void store_best_model(bool edges=false){
 #ifdef USING_HASHVEC
             memset(inside, false, sizeof(bool)*K);
             for (int j = 0; j < D; j++){
@@ -1146,7 +1233,6 @@ class SplitOracleActBCD{
         vector<Float>* cdf_sum;
         HashVec** w_temp;
         vector<int>** w_hash_nnz_index;
-
         int max_iter;
         vector<int>* k_index;
 
@@ -1206,4 +1292,5 @@ class SplitOracleActBCD{
         pair<Float, Float>** v;
         pair<Float, Float>** best_v;
 #endif
+        pair<Float, Float>* ve;
 };
