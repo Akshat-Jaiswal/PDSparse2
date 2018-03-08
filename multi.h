@@ -225,10 +225,11 @@ class Param{
 	char* trainFname;
 	char* modelFname;
 	char* heldoutFname;
+	Float precision;
+	Float decay; // for decay rate
 	Float lambda; //for L1-norm (default 1/N)
 	Float C; //weight of loss
-	int precision; // for precision@k training
-	Float decay; // decay rate for step size computation
+	Float C2;// for L1-norm of edge weights
 	int speed_up_rate; // speed up rate for sampling
 	int split_up_rate; // split up [K] into a number of subsets	
 	Problem* train;
@@ -244,14 +245,15 @@ class Param{
 	
 	Param(){
 		solver = 1;
+		precision=1;
 		lambda = 0.1;
 		C = 1.0;
-		precision=1;
-		decay=0.01;
+		C2= 0.1;
 		max_iter = 50;
 		max_select = -1;
 		speed_up_rate = -1;
 		split_up_rate = 1;
+		decay=0.1;
 		using_importance_sampling = true;
 		post_solve_iter = INF;
 		early_terminate = 3;
@@ -276,7 +278,7 @@ class Model{
 	}
 
 	#ifdef USING_HASHVEC
-	Model(Problem* prob, vector<int>* _w_hash_nnz_index, pair<int, Float>** _w, int* _size_w, int* _hashindices){
+	Model(Problem* prob, vector<int>* _w_hash_nnz_index, pair<int, Float>** _w, int* _size_w, int* _hashindices, SparseVec &_E){
 		D = prob->D;
 		K = prob->K;
 		label_name_list = &(prob->label_name_list);
@@ -285,22 +287,25 @@ class Model{
 		w = _w;
 		size_w = _size_w;
                 hashindices = _hashindices;
+        E.insert(E.begin(),_E.begin(),_E.end());
 	}
 	pair<int, Float>** w;
 	int* size_w;
 	int* hashindices;
 	#else
-	Model(Problem* prob, vector<int>* _w_hash_nnz_index, Float** _w){
+	Model(Problem* prob, vector<int>* _w_hash_nnz_index, Float** _w,SparseVec &_E){
 		D = prob->D;
 		K = prob->K;
 		label_name_list = &(prob->label_name_list);
 		label_index_map = &(prob->label_index_map);
 		w_hash_nnz_index = _w_hash_nnz_index;
 		w = _w;
+		E.insert(E.begin(),_E.begin(),_E.end());
 	}
 	Float** w;
+	//Float* E;
 	#endif
-	
+	SparseVec E;
 	//write model to file
 	void writeModel( char* fname){
 
@@ -334,12 +339,21 @@ class Model{
 #endif
 			fout << endl;
 		}
+		// write out the edges
+		fout << "Edge_Parameters" << endl;
+		fout<<E.size()<<" ";
+		for(auto elem:E){
+			fout<<elem.first<<":"<<elem.second<<" ";
+		}
+		fout<<endl;
 		fout.close();
 		
 	}
 
 	HashVec** Hw;
-	vector<int>* w_hash_nnz_index;	
+	vector<int>* w_hash_nnz_index;
+	vector<int>* e_hash_nnz_index;
+
 	int D;
 	int K;
 	vector<string>* label_name_list;
@@ -355,6 +369,7 @@ class StaticModel{
 		label_index_map = new map<string,int>();
 	}
 	SparseVec* w;
+	SparseVec E;
 	int D;
 	int K;
 	vector<string>* label_name_list;
@@ -414,8 +429,8 @@ void readData(char* fname, Problem* prob)
 		}
 		
 		SparseVec* ins = new SparseVec();
-		//ins->push_back(make_pair(0,1.0));
-
+		// for bias
+		ins->push_back(make_pair(0,1.0));
 		for(int i=st;i<tokens.size();i++){
 			vector<string> kv = split(tokens[i],":");
 			int ind = atoi(kv[0].c_str());
@@ -426,7 +441,6 @@ void readData(char* fname, Problem* prob)
 		}
 		
 		prob->data.push_back(ins);
-		// sort before pushing them
 		sort(lab_indices.begin(),lab_indices.end());
 		prob->labels.push_back(lab_indices);
 	}

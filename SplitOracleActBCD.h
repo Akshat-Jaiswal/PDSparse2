@@ -476,6 +476,8 @@ class SplitOracleActBCD{
                         cerr << "(" << (++terminate_countdown) << "/" << early_terminate << ")";
                         if (terminate_countdown == early_terminate){
                             overall_time -= omp_get_wtime();
+                            // so that it is written to disk
+                            best_model=NULL;
                             break;
                         }
                     }
@@ -499,7 +501,7 @@ class SplitOracleActBCD{
             }
 */
             if (best_model == NULL){
-                store_best_model();
+                store_best_model(true);
             }
 
             //computing heldout accuracy 	
@@ -1175,7 +1177,15 @@ class SplitOracleActBCD{
                     inside[k] = false;
                 }
             }
-            best_model = new Model(train, non_split_index, w, size_w, hashindices);
+            // write down Edges when saving the model to disk
+            SparseVec E;
+            if(edges){
+            	for(int i=0;i<K*(K-1)/2;++i){
+            		if(ve[i].second!=0.0)
+            			E.push_back(make_pair(i,ve[i].second));
+            	}
+            }
+            best_model = new Model(train, non_split_index, w, size_w, hashindices, E);
 #else
             for (int j = 0; j < D; j++){
                 for (vector<int>::iterator it = non_split_index[j].begin(); it != non_split_index[j].end(); it++){
@@ -1204,7 +1214,16 @@ class SplitOracleActBCD{
                     inside[k] = false;
                 }
             }
-            best_model = new Model(train, non_split_index, w);
+
+            // write down Edges when saving the model to disk
+            SparseVec E;
+            if(edges){
+            	for(int i=0;i<K*(K-1)/2;++i){
+            		if(ve[i].second!=0.0)
+            			E.push_back(make_pair(i,ve[i].second));
+            	}
+            }
+            best_model = new Model(train, non_split_index, w, E);
 #endif		
 /*
             if (best_act_k_index == NULL)
