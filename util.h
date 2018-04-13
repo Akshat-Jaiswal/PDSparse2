@@ -36,14 +36,19 @@ const int INF = INT_MAX;
 class ScoreComp{
 	
 	public:
-	ScoreComp(Float* _score){
+	ScoreComp(Float* _score, bool _desc=true){
 		score = _score;
+		desc=_desc;
 	}
 	bool operator()(const int& ind1, const int& ind2){
-		return score[ind1] > score[ind2];
+		if(desc)
+			return score[ind1] > score[ind2];
+		else
+			return score[ind1] < score[ind2];
 	}
 	private:
 	Float* score;
+	bool desc;
 };
 
 class PermutationHash{
@@ -99,7 +104,6 @@ double prox_l1_nneg( double v, double lambda ){
 
 	return v-lambda;
 }
-
 inline Float prox_l1( Float v, Float lambda ){
 	
 	if( fabs(v) > lambda ){
@@ -112,6 +116,71 @@ inline Float prox_l1( Float v, Float lambda ){
 	return 0.0;
 }
 
+void project_to_simplex(Float* x,Float* y, int D, Float C){
+	int* index_u = new int[D];
+	bool flag=true;
+	Float cumsum=0;
+	for (int i = 0; i < D; i++){
+		index_u[i] = i;
+		flag &= y[i]>=0;
+		cumsum+=y[i];
+		x[i]=y[i];
+	}
+	if(cumsum<=C && flag)
+		return;
+	sort(index_u, index_u+D, ScoreComp(y));
+	int p=-1;
+	Float score, max_score;
+	Float cur_sum=0, lambda=0;
+	for(int j=0;j<D;++j){
+		cur_sum+=y[index_u[j]];
+		score=y[index_u[j]]+(1.0/(j+1)*(C- cur_sum));
+		if(score>0){
+			p=j;
+			lambda= score - y[index_u[p]];
+		}
+	}
+	for(int i=0;i<D;++i){
+		x[i]=y[i]+lambda;
+		if(x[i]<0) x[i]=0;
+	}
+	delete[] index_u;
+}
+/*
+ * Assuming y,ybar are sorted and indexing begins at 1
+ */
+Labels* diff_merge(Labels &y, Labels &ybar){
+	Labels::iterator it1,it2;
+	it1=y.begin();
+	it2=ybar.begin();
+	Labels *out=new Labels();
+	while(it1!= y.end() && it2!=ybar.end()){
+		if(*it1==*it2)
+			++it1,++it2;
+		else if(*it1<*it2){
+			out->push_back((*it1)+1);
+			it1++;
+		}else{
+			out->push_back((-*it2)-1);
+			it2++;
+		}
+	}
+	while(it1!=y.end()){
+		out->push_back((*it1)+1);
+		it1++;
+	}
+	while(it2!=ybar.end()){
+			out->push_back(-(*it2)-1);
+			it2++;
+	}
+	return out;
+}
+int sign(int &a){
+	if (a<0)
+		return -1;
+	else
+		return 1;
+}
 double norm_sq( double* v, int size ){
 
 	double sum = 0.0;
