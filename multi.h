@@ -23,7 +23,7 @@ int Problem::K = -1;
 
 class HeldoutEval{
 	public:
-	HeldoutEval(Problem* _heldout){
+	HeldoutEval(Problem* _heldout, int precision=1){
 		heldout = _heldout;
 		N = heldout->data.size();
 		D = heldout->D;
@@ -36,7 +36,7 @@ class HeldoutEval{
 		for (int k = 0; k < K; k++)
 			inside[k] = false;
 
-		T = 1;
+		T = precision;
 	}
 
 	~HeldoutEval(){

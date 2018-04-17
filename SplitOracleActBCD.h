@@ -269,7 +269,7 @@ class SplitOracleActBCD{
                     for(int p=0;p<prec;++p){
                     	alpha_i_new_diff[p]= new Float[cons[i][p].act_k_diff_index.size()];
 
-                    	subSolve3(i,
+                    	subSolve4(i,
 								cons[i][p].act_k_diff_index,
 								alpha_i_new_diff[p],
 								p+1
@@ -290,13 +290,14 @@ class SplitOracleActBCD{
 						for (vector<pair<Labels*,Float>>::iterator it =
 								act_k_index_neg.begin(); it != act_k_index_neg.end();
 								it++) {
-							delta_alpha = alpha_i_new_diff[p][ind++] - it->second;
-							for (Labels::iterator it2 = it->first->begin();
+							delta_alpha = alpha_i_new_diff[p][ind++] - it->second;;
+                            for (Labels::iterator it2 = it->first->begin();
 									it2 != it->first->end(); ++it2) {
 								if (actives.find(*it2) == actives.end()) {
 									actives[*it2] = 0;
 								}
 								actives[*it2] += delta_alpha;
+
 							}
 						}
     				}
@@ -358,9 +359,10 @@ class SplitOracleActBCD{
     						pair<Float, Float> vjk_wjk = vj[k];
     						Float vjk = vjk_wjk.first + f_val * delta_alpha;
     						Float wjk = prox_l1(vjk, lambda);
+
     						Float wjk_old = vjk_wjk.second;
     						vj[k] = make_pair(vjk, wjk);
-    						if (wjk_old != wjk) {
+                            if (wjk_old != wjk) {
     							if (fabs(wjk_old) < EPS) {
     								wJ[loc(k)].push_back(k);
     							}
@@ -740,7 +742,7 @@ class SplitOracleActBCD{
     		SparseVec* xi = data->at(I);
     		int n = act_k_neg_index.size();
     		Float* b = new Float[n];
-    		Float A = Q_diag[I]* exp(decay_rate * (iter+5));
+    		Float A = Q_diag[I]* (1+ decay_rate * iter);
     		int i = 0, j = 0;
     		Float lf=1.0/(prec);
     		// negative set
@@ -767,7 +769,60 @@ class SplitOracleActBCD{
     		delete[] x;
     		delete[] b;
     	}
+        /**
+        * Function that uses conditional gradient decent to update alpha parameters
+        **/
+        void subSolve4(int I,
+                vector<pair<Labels*,Float>>& act_k_neg_index,
+                Float* &alpha_i_new_neg, int prec) {
 
+            Labels* yi = &(labels->at(I));
+            SparseVec* xi = data->at(I);
+            int n = act_k_neg_index.size();
+            Float* y = new Float[n];
+            Float* gradients= new Float[n];
+            Float step_size=2.0/(iter+3); // iter starts with 0
+            int min_index=-1,min_value=0;
+            // initialize with all zeros
+            memset(y,0.0, sizeof(Float)*n);
+            memset(gradients,0.0, sizeof(Float)*n);
+            // compute gradients
+            int i = 0;
+            Float lf=1.0/(prec);
+            for (vector<pair<Labels*, Float>>::iterator it =
+                    act_k_neg_index.begin(); it != act_k_neg_index.end(); it++) {
+                Labels* k = it->first;
+                Float alpha_ik = it->second;
+                gradients[i] =0 ;
+                for (Labels::iterator it = k->begin();
+                        it != k->end(); ++it) {
+                    if(*it>0)
+                        gradients[i]-=lf;
+                    gradients[i] += prod_cache[abs(*it)-1] * sign(*it);
+                }
+                ++i;
+            }
+            // find the min element and its index
+            for(int j=0;j<n;++j){
+                if(gradients[j]<min_value){
+                    min_value=gradients[j];
+                    min_index=j;
+                }
+            }
+            // set the entry at min_index=C
+
+            if(min_value<0){
+                y[min_index]=C;
+            }
+            //compute the new alpha values
+            for (int i = 0; i < n; ++i)
+            {
+                alpha_i_new_neg[i]=step_size*y[i];
+                alpha_i_new_neg[i]+= (1-step_size)* act_k_neg_index[i].second;
+            }
+            delete[] gradients;
+            delete[] y;
+        }
         //search with importance sampling	
         void search_active_i_importance( int i, vector<pair<Labels*, Float>>& act_k_index ){
             //prod_cache should be all zero

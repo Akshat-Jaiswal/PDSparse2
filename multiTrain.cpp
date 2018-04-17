@@ -110,7 +110,7 @@ int main(int argc, char** argv){
 		Problem* heldout = new Problem();
 		readData( param->heldoutFname, heldout);
 		cerr << "heldout N=" << heldout->data.size() << endl;
-		param->heldoutEval = new HeldoutEval(heldout);
+		param->heldoutEval = new HeldoutEval(heldout,param->precision);
 	}
 	int D = train->D;
 	int K = train->K;
