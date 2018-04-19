@@ -229,6 +229,7 @@ class SplitOracleActBCD{
             //best_act_k_index = NULL;
 
             //main loop
+            ofstream f_dual("objectives.txt");
             int terminate_countdown = 0;
             double search_time=0.0, subsolve_time=0.0, maintain_time=0.0;
             double last_search_time = 0.0, last_subsolve_time = 0.0, last_maintain_time = 0.0;
@@ -442,6 +443,7 @@ class SplitOracleActBCD{
                 last_subsolve_time = subsolve_time;
                 overall_time += omp_get_wtime();
                 Float dual_cur=dual_obj();
+                f_dual<<dual_cur<<endl;
                 cerr << "dual_obj=" << dual_cur << "\t";
                 //early terminate: if heldout_test_accuracy does not increase in last <early_terminate> iterations, stop!	
                 if( heldoutEval != NULL){
@@ -477,6 +479,7 @@ class SplitOracleActBCD{
                 overall_time -= omp_get_wtime();
                 iter++;
             }
+            f_dual.close();
             cerr << endl;
 
             //recover act_k_index to the best state so far
@@ -1131,13 +1134,13 @@ class SplitOracleActBCD{
 						}
                     }
                     // now need to partial sort on the basis of scores
-                    int partial_length=yi->size()+ max_elements +1;
+                    int partial_length=yi->size()+ max_elements +max_select;
                     partial_length= partial_length<K? partial_length:K;
             		nth_element(max_indices, max_indices+partial_length, max_indices+K, ScoreComp(prod_cache));
             		sort(max_indices, max_indices+partial_length, ScoreComp(prod_cache));
 
             		// need flags to indicate set has been added already
-            		vector<bool> found(prec,false);
+            		vector<int> need(prec,max_select);
                     // now declare vectors to store incremental sets
             		bool terminate=false;
                     vector<vector<int>> level[k];
@@ -1157,7 +1160,7 @@ class SplitOracleActBCD{
                                 	l--;
                                 }
                                 // only add if its not already found
-                                if(!found[j]){
+                                if(need[0]!=0){
                                     //check if this new configuration is already in set
                                     // if not then add and break
                                     long long hash= gethash(newconfig);
@@ -1165,7 +1168,7 @@ class SplitOracleActBCD{
                                         Labels* ybar=new vector<int>(newconfig.begin(),newconfig.end());
                                         // add this to active set
                                         cons[j].act_k_neg_index.push_back(make_pair(ybar,0.0));
-                                        found[j]=true;
+                                        need[j]--;
                                         break;
                                     }
                                     // else do nothing
@@ -1175,32 +1178,33 @@ class SplitOracleActBCD{
                         }
                         // add these to first level
                         vector<int> newconfig(1,max_indices[i]);
-                        if(!found[0]){
+                        if(need[0]!=0){
                             long long hash= gethash(newconfig);
                                 if(actives[0].find(hash)==actives[0].end()){
                                     Labels* ybar=new vector<int>(newconfig.begin(),newconfig.end());
                                         // add this to active set
                                     cons[0].act_k_neg_index.push_back(make_pair(ybar,0.0));
-                                    found[0]=true;
+                                    need[0]--;
                                     break;
                                 }
                         }
                         level[0].push_back(newconfig);
                         // check if all the sets of size 1-k have been found
                         terminate=true;
-                        for(auto e:found)
-                        	terminate &=e;
+                        for(auto e:need)
+                        	terminate &= e==0;
                     }
               // now create a diff vector using the last set attached and all positives
                     for(int p=0;p<prec;++p){
-                    	if(!found[p]){
-                    		cerr<<"WARNING!!! size "<<p+1<<" has no new negative set"<<endl;
-                    		continue;
-                    	}
-                    	Labels* latest=cons[p].act_k_neg_index.back().first;
-                    	for(auto elem:cons[p].act_k_pos_index){
-                    		cons[p].act_k_diff_index.push_back(
-                    				make_pair(diff_merge(*(elem.first),*(latest)),0.0));
+                    	while(need[p]!=max_select){
+                    		int l=cons[p].act_k_neg_index.size();
+	                    	int diff=max_select-need[p];
+	                    	Labels* latest=cons[p].act_k_neg_index[l-diff].first;
+	                    	for(auto elem:cons[p].act_k_pos_index){
+	                    		cons[p].act_k_diff_index.push_back(
+	                    				make_pair(diff_merge(*(elem.first),*(latest)),0.0));
+	                    	}
+	                    	need[p]++;
                     	}
                     }
         }
