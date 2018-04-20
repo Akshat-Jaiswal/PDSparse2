@@ -1160,7 +1160,7 @@ class SplitOracleActBCD{
                                 	l--;
                                 }
                                 // only add if its not already found
-                                if(need[0]!=0){
+                                if(need[j]!=0){
                                     //check if this new configuration is already in set
                                     // if not then add and break
                                     long long hash= gethash(newconfig);
