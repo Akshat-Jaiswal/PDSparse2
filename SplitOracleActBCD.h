@@ -133,7 +133,7 @@ class SplitOracleActBCD{
     			}
     		}
     		delete[] cons;
-
+    		delete[] U;
 
     		delete[] hashindices;
             delete[] non_split_index;	
@@ -204,6 +204,7 @@ class SplitOracleActBCD{
 
             // initialize the constraint sets of each example
             cons= new constraints*[N];
+            U=new vector<int>[N];
             memset(freq,0,sizeof(int)*K);
             vector<int> tmp;
             for(int i=0,k;i<N;i++){
@@ -223,6 +224,9 @@ class SplitOracleActBCD{
                 	cons[i][p-1].act_k_diff_index.push_back(
                 			make_pair(new Labels(),0.0));
                 }
+                // initial vertex is all zeros and C for first alpha value 
+                // corresponding to xi>=0 constraint
+                U[i].push_back(0);
             }
 
             //for storing best model
@@ -270,8 +274,9 @@ class SplitOracleActBCD{
                     for(int p=0;p<prec;++p){
                     	alpha_i_new_diff[p]= new Float[cons[i][p].act_k_diff_index.size()];
 
-                    	subSolve4(i,
+                    	subSolve6(i,
 								cons[i][p].act_k_diff_index,
+								U[i],
 								alpha_i_new_diff[p],
 								p+1
                     	);
@@ -387,9 +392,9 @@ class SplitOracleActBCD{
 						}
 
 						delete[] alpha_i_new_diff[p];
-						// lets not shrink them for once
-						has_zero=false;
 						//shrink act_k_diff_index
+						//lets not shrink for once
+						has_zero=false;
 						if (has_zero) {
 							vector<pair<Labels*,Float>> tmp_vec;
 							tmp_vec.reserve(act_k_index_neg.size());
@@ -413,11 +418,13 @@ class SplitOracleActBCD{
 
                 cerr << "i=" << iter << "\t" ;
                 nnz_a_i = 0.0;
-/*
+
                 for(int i=0;i<N;i++){
-                    nnz_a_i += act_k_index_pos[i].size()+act_k_index_neg[i].size();
+                	int prec=precision<(labels->at(i)).size()?precision:(labels->at(i)).size();
+                	for(int p=0;p<prec;++p)
+	                    nnz_a_i += cons[i][p].act_k_diff_index.size();
                 }
-*/
+
                 nnz_a_i /= N;
                 cerr << "nnz_a_i="<< (nnz_a_i) << "\t";
                 nnz_w_j = 0.0;
@@ -443,7 +450,7 @@ class SplitOracleActBCD{
                 last_subsolve_time = subsolve_time;
                 overall_time += omp_get_wtime();
                 Float dual_cur=dual_obj();
-                f_dual<<dual_cur<<endl;
+                f_dual<<nnz_a_i<<" "<<dual_cur<<endl;
                 cerr << "dual_obj=" << dual_cur << "\t";
                 //early terminate: if heldout_test_accuracy does not increase in last <early_terminate> iterations, stop!	
                 if( heldoutEval != NULL){
@@ -452,8 +459,10 @@ class SplitOracleActBCD{
 #else
                     Float heldout_test_acc = heldoutEval->calcAcc(v, w_hash_nnz_index, split_up_rate);
 #endif
-                    cerr << "heldout Acc=" << heldout_test_acc << " ";
-                    if ( heldout_test_acc > best_heldout_acc){
+
+/*                  Float heldout_test_acc=evaluate_xi(); 
+*/					 cerr << "heldout Acc=" << heldout_test_acc << " ";
+                    if ( heldout_test_acc > best_heldout_acc && iter !=0){
                         best_heldout_acc = heldout_test_acc;
                         dual=dual_cur;
                         store_best_model();
@@ -518,6 +527,81 @@ class SplitOracleActBCD{
         }
 
         //compute 1/2 \|w\|_2^2 + \sum_{i,k: k \not \in y_i} alpha_{i, k}
+        Float evaluate_xi(){
+        	int counts=0;
+        	bool flag;
+        	Float psi,min_score,max_score,scores;
+        	int S=0;
+        	for(int I=0;I<N;++I){
+        	// compute the new updated scores for each label
+//compute <xi,wk> for k=1...K
+            		Labels* yi = &(labels->at(I));
+            		SparseVec* xi = data->at(I);
+            		// calculate the scores for each class
+            		memset(prod_cache, 0.0, sizeof(Float) * K);
+            		for (SparseVec::iterator current_index = xi->begin();
+            				current_index < xi->end(); current_index++) {
+            			Float xij = current_index->second;
+            			int j = current_index->first;
+            			vector<int>& wjS = w_hash_nnz_index[j][S];
+            			if (wjS.size() == 0)
+            				continue;
+            			int k = 0, ind = 0;
+            #ifdef USING_HASHVEC
+            			int size_vj0 = size_v[j] - 1;
+            #endif
+            			Float wjk = 0.0;
+            			auto vj = v[j];
+            			for (vector<int>::iterator it2 = wjS.begin(); it2 != wjS.end();
+            					it2++) {
+            				k = *(it2);
+            #ifdef USING_HASHVEC
+            				int index_v = 0;
+            				find_index(vj, index_v, k, size_vj0, hashindices);
+            				wjk = vj[index_v].second.second;
+            #else
+            				wjk = vj[k].second;
+            #endif
+                            if (wjk == 0.0 || inside[k]){
+                                *it2=*(wjS.end()-1);
+                                wjS.erase(wjS.end()-1);
+                                it2--;
+                                continue;
+                            }
+                            inside[k] = true;
+            				prod_cache[k] += wjk * xij;
+            			}
+            			for (vector<int>::iterator it2 = wjS.begin(); it2 != wjS.end(); it2++){
+                            inside[*it2] = false;
+                        }
+            		}
+            	// now check if all the constraints are satisfied
+            		psi=0;
+            		flag=true;
+            		min_score=9999;
+            		max_score=-9999;
+            		for(auto elem:cons[I][0].act_k_pos_index){
+            			Labels* vec=elem.first;
+            			scores=0;
+            			for(auto k:*vec){
+            				scores+= prod_cache[k];
+            			}
+            			min_score=min_score<scores?min_score:scores;
+            		}
+            		for(auto elem:cons[I][0].act_k_neg_index){
+            			Labels* vec=elem.first;
+            			scores=0;
+            			for(auto k:*vec){
+            				scores+= prod_cache[k];
+            			}
+            			max_score=max_score>scores?max_score:scores;
+            		}
+ 
+            		if(min_score>max_score)
+            			counts++;
+        	}
+        	return counts*1.0/N;
+        }
         Float dual_obj(){
             Float dual_obj = 0.0;
             memset(inside, false, sizeof(bool)*K);
@@ -739,7 +823,7 @@ class SplitOracleActBCD{
         }
     	void subSolve3(int I,
 				vector<pair<Labels*,Float>>& act_k_neg_index,
-				Float* &alpha_i_new_neg, int prec) {
+				Float* alpha_i_new_neg, int prec) {
 
     		Labels* yi = &(labels->at(I));
     		SparseVec* xi = data->at(I);
@@ -777,7 +861,7 @@ class SplitOracleActBCD{
         **/
         void subSolve4(int I,
                 vector<pair<Labels*,Float>>& act_k_neg_index,
-                Float* &alpha_i_new_neg, int prec) {
+                Float* alpha_i_new_neg, int prec) {
 
             Labels* yi = &(labels->at(I));
             SparseVec* xi = data->at(I);
@@ -814,7 +898,7 @@ class SplitOracleActBCD{
             }
             // set the entry at min_index=C
 
-            if(min_value<0){
+            if(min_value<=0 && min_index!=-1){
                 y[min_index]=C;
             }
             //compute the new alpha values
@@ -825,6 +909,285 @@ class SplitOracleActBCD{
             }
             delete[] gradients;
             delete[] y;
+        }
+        /**
+        * Function that uses pairwise conditional gradient decent to update alpha parameters
+        **/
+        void subSolve5(int I,
+                vector<pair<Labels*,Float>>& act_k_neg_index,
+                std::vector<int> &U, 
+                Float* alpha_i_new_neg,
+                int prec) {
+
+            Labels* yi = &(labels->at(I));
+            SparseVec* xi = data->at(I);
+            int n = act_k_neg_index.size();
+            Float* d = new Float[n];
+            Float* gradients= new Float[n];
+            int min_index=0,min_value=0;
+            // initialize with all zeros
+            memset(d,0.0, sizeof(Float)*n);
+            memset(gradients,0.0, sizeof(Float)*n);
+            // compute gradients
+            int i = 0;
+            Float lf=1.0/(prec);
+            for (vector<pair<Labels*, Float>>::iterator it =
+                    act_k_neg_index.begin(); it != act_k_neg_index.end(); it++) {
+                Labels* k = it->first;
+                Float alpha_ik = it->second;
+                gradients[i] =0 ;
+                for (Labels::iterator it = k->begin();
+                        it != k->end(); ++it) {
+                    if(*it>0)
+                        gradients[i]-=lf;
+                    gradients[i] += prod_cache[abs(*it)-1] * sign(*it);
+                }
+                ++i;
+            }
+            // find the min element and its index
+            for(int j=0;j<n;++j){
+                if(gradients[j]<min_value){
+                    min_value=gradients[j];
+                    min_index=j;
+                }
+            }
+            // find the max element u and its index from U
+            int u,max_value=-9999;
+            for(auto elem:U){
+                if(gradients[elem]>max_value){
+                    max_value=gradients[elem];
+                    u=elem;
+                }
+            }
+
+            // set the entry at min_index=C
+            if(min_value<=0 && min_index!=-1){
+                d[min_index]=C;
+            }
+            // set the entry at max_index,u as -C
+            	d[u]-=C;
+            //compute the new alpha values
+            //need to compute the step size using line search
+            Float step_size=1.0; // initial step size
+            Float tau=0.5, c=0.5; // search control parameters
+            Float m=0,t;
+            m= C*gradients[min_index]-C*gradients[u];  // m= d^T\delta f
+            t=-c*m;
+            Float changes=0;
+            Float delta_alpha;
+            Float *alpha_new;
+            // search for the step_size
+            map<int,Float> actives;
+            while(true){
+            	changes=0;
+            	actives.clear();
+            	// compute new alphas using current size
+            	    for (int i = 0; i < n; ++i)
+		            {
+		                alpha_i_new_neg[i]=step_size*d[i];
+		                alpha_i_new_neg[i]+= act_k_neg_index[i].second;
+		                delta_alpha=alpha_i_new_neg[i]-act_k_neg_index[i].second;
+		                if(i!=0)  // since that is not part of objective (xi >=0)
+		                changes+=delta_alpha;
+		                // push this info into a map
+		                // iterate over labels corresponding to this alpha
+		                for(auto it:*(act_k_neg_index[i].first)){
+		                	if(actives.find(it)==actives.end())
+		                		actives[it]=0.0;
+		                	actives[it]+=delta_alpha;
+		                }
+		            }
+		 		changes+=calculate_change(I,actives);
+/*		 		cerr<<" step_size: "<<step_size;
+		 		cerr<<" t:"<<t;
+		 		cerr<<" changes:"<<changes<<endl;
+*/		 		if(changes>=step_size*t)
+		 			break;
+		 		step_size=tau*step_size;
+            }
+            //update U
+/*            cerr<<"r";
+*/            U.push_back(min_index);
+            delete[] gradients;
+            delete[] d;
+/*            exit(1);
+*/        }
+        /**
+        * Function that uses away step conditional gradient decent to update alpha parameters
+        **/
+        void subSolve6(int I,
+                vector<pair<Labels*,Float>>& act_k_neg_index,
+                std::vector<int> &U, 
+                Float* alpha_i_new_neg,
+                int prec) {
+
+            Labels* yi = &(labels->at(I));
+            SparseVec* xi = data->at(I);
+            int n = act_k_neg_index.size();
+            Float* d = new Float[n];
+            Float* gradients= new Float[n];
+            int min_index=0,min_value=0;
+            // initialize with all zeros
+            memset(d,0.0, sizeof(Float)*n);
+            memset(gradients,0.0, sizeof(Float)*n);
+            // compute gradients
+            int i = 0;
+            Float lf=1.0/(prec);
+            for (vector<pair<Labels*, Float>>::iterator it =
+                    act_k_neg_index.begin(); it != act_k_neg_index.end(); it++) {
+                Labels* k = it->first;
+                Float alpha_ik = it->second;
+                gradients[i] =0 ;
+                for (Labels::iterator it = k->begin();
+                        it != k->end(); ++it) {
+                    if(*it>0)
+                        gradients[i]-=lf;
+                    gradients[i] += prod_cache[abs(*it)-1] * sign(*it);
+                }
+                ++i;
+            }
+            // find the min element and its index + compute inner product simultaneously
+            Float inner_product=0.0;
+            for(int j=0;j<n;++j){
+                if(gradients[j]<min_value){
+                    min_value=gradients[j];
+                    min_index=j;
+                }
+                inner_product+= gradients[j]* (-2*act_k_neg_index[j].second);
+            }
+            // find the max element u and its index from U
+            int u,max_value=-9999;
+            for(auto elem:U){
+                if(gradients[elem]>max_value){
+                    max_value=gradients[elem];
+                    u=elem;
+                }
+            }
+            inner_product+= gradients[min_index]+gradients[u];
+            if(inner_product<=0){
+            	for(int j=0;j<n;++j){
+            		d[j]=-act_k_neg_index[j].second;
+            	}
+            	d[min_index]+=C;
+            }
+            else{
+            	for(int j=0;j<n;++j){
+            		d[j]=act_k_neg_index[j].second;
+            	}
+            	d[u]-=C;
+
+            }
+            //compute the new alpha values
+            //need to compute the step size using line search
+            Float step_size=1.0; // initial step size
+            Float tau=0.5, c=0.5; // search control parameters
+            Float m=0,t;
+            m= C*gradients[min_index]-C*gradients[u];  // m= d^T\delta f
+            t=-c*m;
+            Float changes=0;
+            Float delta_alpha;
+            Float *alpha_new;
+            // search for the step_size
+            map<int,Float> actives;
+            while(true){
+            	changes=0;
+            	actives.clear();
+            	// compute new alphas using current size
+            	    for (int i = 0; i < n; ++i)
+		            {
+		                alpha_i_new_neg[i]=step_size*d[i];
+		                alpha_i_new_neg[i]+= act_k_neg_index[i].second;
+		                delta_alpha=alpha_i_new_neg[i]-act_k_neg_index[i].second;
+		                if(i!=0)  // since that is not part of objective (xi >=0)
+		                changes+=delta_alpha;
+		                // push this info into a map
+		                // iterate over labels corresponding to this alpha
+		                for(auto it:*(act_k_neg_index[i].first)){
+		                	if(actives.find(it)==actives.end())
+		                		actives[it]=0.0;
+		                	actives[it]+=delta_alpha;
+		                }
+		            }
+		 		changes+=calculate_change(I,actives);
+/*		 		cerr<<" step_size: "<<step_size;
+		 		cerr<<" t:"<<t;
+		 		cerr<<" changes:"<<changes<<endl;
+*/		 		if(changes>=step_size*t)
+		 			break;
+		 		step_size=tau*step_size;
+            }
+            //update U
+/*            cerr<<"r";
+*/            U.push_back(min_index);
+            delete[] gradients;
+            delete[] d;
+/*            exit(1);
+*/        }
+
+        /**
+        *	Function returns the change in dual objective without changing the parameters 
+        *	@param map: storing the changes in the alpha values for labels
+        *	@returns change in quadratic part of dual (old - previous)
+        **/
+        Float calculate_change(int I, map<int,Float>& actives){
+        	SparseVec* x_i = data->at(I);
+        	Float changes=0;
+        			for(SparseVec::iterator it=x_i->begin(); it!=x_i->end(); it++){
+                        int J = it->first; 
+                        Float f_val = it->second;
+                        vector<int>* wJ = w_hash_nnz_index[J];
+#ifdef USING_HASHVEC
+                        pair<int, pair<Float, Float>>* vj = v[J];
+                        int size_vj = size_v[J];
+                        int util_vj = util_v[J];
+                        int size_vj0 = size_vj - 1;
+                        ind = 0;
+    					for (std::map<int, Float>::iterator it2 = actives.begin();
+    							it2 != actives.end(); it2++) {
+    						int k = it2->first;
+    						Float delta_alpha = it2->second;
+    						if(k<0){
+    							k=-k;
+    							delta_alpha=-delta_alpha;
+    						}
+    						k--;
+                            if( fabs(delta_alpha) < EPS )
+                                continue;
+                            //update v, w
+                            find_index(vj, index_v, k, size_vj0, hashindices);
+                            Float vjk = vj[index_v].second.first + f_val*delta_alpha;
+                            Float wjk_old = vj[index_v].second.second;
+                            Float wjk = prox_l1(vjk, lambda);
+                            Float dw= wjk-wjk_old;
+    						changes+= dw*dw + 2* dw * wjk_old;
+                        }
+#else
+    					pair<Float, Float>* vj = v[J];
+    					int ind = 0;
+    					int k;
+    					for (std::map<int, Float>::iterator it2 = actives.begin();
+    							it2 != actives.end(); it2++) {
+    						k = it2->first;
+    						Float delta_alpha = it2->second;
+    						if(k<0){
+    						    k=-k;
+    						    delta_alpha=-delta_alpha;
+    						}
+    						k--;
+    						if (fabs(delta_alpha) < EPS)
+    							continue;
+    						//update v, w
+    						pair<Float, Float> vjk_wjk = vj[k];
+    						Float vjk = vjk_wjk.first + f_val * delta_alpha;
+    						Float wjk = prox_l1(vjk, lambda);
+
+    						Float wjk_old = vjk_wjk.second;
+    						Float dw= wjk-wjk_old;
+    						changes+= dw*dw + 2* dw * wjk_old;
+    					}
+#endif
+                    }
+            return -changes;
         }
         //search with importance sampling	
         void search_active_i_importance( int i, vector<pair<Labels*, Float>>& act_k_index ){
@@ -1337,6 +1700,7 @@ class SplitOracleActBCD{
         //vector<pair<int, Float>>* act_k_index;
         // separate for positive and negative part of constraints
         constraints **cons;
+        vector<int> *U;
         //for storing best model
         //vector<pair<int, Float>>* best_act_k_index;
         vector<int>* non_split_index;
