@@ -277,7 +277,7 @@ class SplitOracleActBCD{
                     	subSolve6(i,
 								cons[i][p].act_k_diff_index,
 								U[i],
-								alpha_i_new_diff[p],
+                                alpha_i_new_diff[p],
 								p+1
                     	);
                     }
@@ -462,7 +462,7 @@ class SplitOracleActBCD{
 
 /*                  Float heldout_test_acc=evaluate_xi(); 
 */					 cerr << "heldout Acc=" << heldout_test_acc << " ";
-                    if ( heldout_test_acc > best_heldout_acc && iter !=0){
+                    if ( heldout_test_acc > best_heldout_acc){
                         best_heldout_acc = heldout_test_acc;
                         dual=dual_cur;
                         store_best_model();
@@ -857,7 +857,7 @@ class SplitOracleActBCD{
     		delete[] b;
     	}
         /**
-        * Function that uses conditional gradient decent to update alpha parameters
+        * Function that uses conditional gradient decent with line search for step size to update alpha parameters
         **/
         void subSolve4(int I,
                 vector<pair<Labels*,Float>>& act_k_neg_index,
@@ -866,12 +866,11 @@ class SplitOracleActBCD{
             Labels* yi = &(labels->at(I));
             SparseVec* xi = data->at(I);
             int n = act_k_neg_index.size();
-            Float* y = new Float[n];
+            Float* d = new Float[n];
             Float* gradients= new Float[n];
-            Float step_size=2.0/(iter+3); // iter starts with 0
-            int min_index=-1,min_value=0;
+            int min_index=0,min_value=0;
             // initialize with all zeros
-            memset(y,0.0, sizeof(Float)*n);
+            memset(d,0.0, sizeof(Float)*n);
             memset(gradients,0.0, sizeof(Float)*n);
             // compute gradients
             int i = 0;
@@ -889,26 +888,57 @@ class SplitOracleActBCD{
                 }
                 ++i;
             }
-            // find the min element and its index
+            // find the min element and its index + compute inner product simultaneously
+            Float inner_product=0.0;
             for(int j=0;j<n;++j){
                 if(gradients[j]<min_value){
                     min_value=gradients[j];
                     min_index=j;
                 }
+                inner_product+= gradients[j]* (-1*act_k_neg_index[j].second);
+            	d[j]=-act_k_neg_index[j].second;
             }
-            // set the entry at min_index=C
+            inner_product+= C*gradients[min_index];
+            d[min_index]+=C;
 
-            if(min_value<=0 && min_index!=-1){
-                y[min_index]=C;
-            }
             //compute the new alpha values
-            for (int i = 0; i < n; ++i)
-            {
-                alpha_i_new_neg[i]=step_size*y[i];
-                alpha_i_new_neg[i]+= (1-step_size)* act_k_neg_index[i].second;
+            //need to compute the step size using line search
+            Float step_size=1.0; // initial step size
+            Float tau=0.5, c=0.5; // search control parameters
+            Float m=0,t;
+            m= inner_product;  // m= d^T\delta f
+            t=-c*m;
+            Float changes=0;
+            Float delta_alpha;
+            Float *alpha_new;
+            // search for the step_size
+            map<int,Float> actives;
+            while(true){
+                changes=0;
+                actives.clear();
+                // compute new alphas using current size
+                    for (int i = 0; i < n; ++i)
+                    {
+                        alpha_i_new_neg[i]=step_size*d[i];
+                        alpha_i_new_neg[i]+= act_k_neg_index[i].second;
+                        delta_alpha=alpha_i_new_neg[i]-act_k_neg_index[i].second;
+                        if(i!=0)  // since that is not part of objective (xi >=0)
+                        changes+=delta_alpha;
+                        // push this info into a map
+                        // iterate over labels corresponding to this alpha
+                        for(auto it:*(act_k_neg_index[i].first)){
+                            if(actives.find(it)==actives.end())
+                                actives[it]=0.0;
+                            actives[it]+=delta_alpha;
+                        }
+                    }
+                changes+=calculate_change(I,actives);
+               if(changes>=step_size*t)
+                    break;
+                step_size=tau*step_size;
             }
             delete[] gradients;
-            delete[] y;
+            delete[] d;
         }
         /**
         * Function that uses pairwise conditional gradient decent to update alpha parameters
@@ -1063,7 +1093,7 @@ class SplitOracleActBCD{
                     u=elem;
                 }
             }
-            inner_product+= gradients[min_index]+gradients[u];
+            inner_product+= C*(gradients[min_index]+gradients[u]);
             if(inner_product<=0){
             	for(int j=0;j<n;++j){
             		d[j]=-act_k_neg_index[j].second;
@@ -1131,6 +1161,10 @@ class SplitOracleActBCD{
         **/
         Float calculate_change(int I, map<int,Float>& actives){
         	SparseVec* x_i = data->at(I);
+#ifdef USING_HASHVEC
+                    int index_alpha = 0, index_v = 0;
+#endif
+
         	Float changes=0;
         			for(SparseVec::iterator it=x_i->begin(); it!=x_i->end(); it++){
                         int J = it->first; 
@@ -1141,7 +1175,7 @@ class SplitOracleActBCD{
                         int size_vj = size_v[J];
                         int util_vj = util_v[J];
                         int size_vj0 = size_vj - 1;
-                        ind = 0;
+                        int ind = 0;
     					for (std::map<int, Float>::iterator it2 = actives.begin();
     							it2 != actives.end(); it2++) {
     						int k = it2->first;
@@ -1648,6 +1682,23 @@ class SplitOracleActBCD{
             for (int i = 0; i < N; i++)
                 best_act_k_index[i] = act_k_index[i];
 */
+            //store the constraints
+            ofstream fout("constraints.txt");
+            // Each line contains the labels for that particular example which are part of active set
+            for(int i=0;i<N;++i){
+            	// first write the positive labels then negative
+            	for(auto elem:cons[i][0].act_k_pos_index){
+            		for(auto label: *(elem.first))
+            			fout<<label<<" ";
+            	}
+            	// now write the negative labels then negative
+            	for(auto elem:cons[i][0].act_k_neg_index){
+            		for(auto label: *(elem.first))
+            			fout<<label<<" ";
+            	}
+            	fout<<"-1"<<endl; // to mark end
+            }
+            fout.close();
         }
 
     private:
