@@ -226,7 +226,7 @@ class Param{
 	char* modelFname;
 	char* heldoutFname;
 	Float lambda; //for L1-norm (default 1/N)
-	Float C; //weight of loss
+	Float *C; //weight of loss
 	int precision; // for precision@k training
 	Float decay; // decay rate for step size computation
 	int speed_up_rate; // speed up rate for sampling
@@ -243,11 +243,12 @@ class Param{
 	bool dump_model;
 	
 	Param(){
-		solver = 1;
+		solver = 2;
 		lambda = 0.1;
-		C = 1.0;
 		precision=1;
 		decay=0.01;
+		C= new Float[1];
+		C[0]= 1.0;
 		max_iter = 50;
 		max_select = -1;
 		speed_up_rate = -1;
@@ -261,6 +262,7 @@ class Param{
 	}
 
 	~Param(){
+		delete[] C;
 		delete[] trainFname;
 		delete[] modelFname;
 		delete[] heldoutFname;

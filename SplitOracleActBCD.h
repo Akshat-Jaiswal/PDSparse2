@@ -30,6 +30,7 @@ class SplitOracleActBCD{
             C = param->C;
             precision=param->precision;
             decay_rate=param->decay;
+            solver= param->solver;
             N = train->N;
             D = train->D;
             K = train->K;
@@ -62,8 +63,11 @@ class SplitOracleActBCD{
             speed_up_rate = param->speed_up_rate;
             split_up_rate = param->split_up_rate;
             if( speed_up_rate==-1 )
-                speed_up_rate = ceil( min(5.0*D*K/nnz(train->data)/C/log((Float)K), d/10.0) );
-            cerr << "lambda=" << lambda << ", C=" << C << endl;
+                speed_up_rate = ceil( min(5.0*D*K/nnz(train->data)/C[0]/log((Float)K), d/10.0) );
+            cerr << "lambda=" << lambda << ", C=";
+            for(int p=0;p< precision;++p)
+            	cerr  << C[p] << " ";
+            cerr<<endl;
             using_importance_sampling = param->using_importance_sampling;
             if (using_importance_sampling){
                 cerr << "using importance sampling" << ", speed up rate=" << speed_up_rate << endl;
@@ -131,6 +135,7 @@ class SplitOracleActBCD{
     				for(auto elem:cons[i][p].act_k_diff_index)
     					delete elem.first;
     			}
+    			delete[] U[i];
     		}
     		delete[] cons;
     		delete[] U;
@@ -204,7 +209,7 @@ class SplitOracleActBCD{
 
             // initialize the constraint sets of each example
             cons= new constraints*[N];
-            U=new vector<int>[N];
+            U=new vector<int>*[N];
             memset(freq,0,sizeof(int)*K);
             vector<int> tmp;
             for(int i=0,k;i<N;i++){
@@ -217,16 +222,17 @@ class SplitOracleActBCD{
                 // add all the combinations of size 1-k
                 k=precision<yi->size()?precision:yi->size();
                 cons[i]= new constraints[k];
+                U[i]= new vector<int>[k];
                 for(int p=1;p<=k;++p){
                 	makeCombiUtil(cons[i][p-1].act_k_pos_index,tmp,0,p,yi);
                 	// for xi>=0 add this constraint
                 	// an empty vector whose gradient will always be zero
                 	cons[i][p-1].act_k_diff_index.push_back(
                 			make_pair(new Labels(),0.0));
+	                // initial vertex is all zeros and C for first alpha value 
+	                // corresponding to xi>=0 constraint
+	                U[i][p-1].push_back(0);
                 }
-                // initial vertex is all zeros and C for first alpha value 
-                // corresponding to xi>=0 constraint
-                U[i].push_back(0);
             }
 
             //for storing best model
@@ -273,13 +279,44 @@ class SplitOracleActBCD{
 
                     for(int p=0;p<prec;++p){
                     	alpha_i_new_diff[p]= new Float[cons[i][p].act_k_diff_index.size()];
-
-                    	subSolve6(i,
-								cons[i][p].act_k_diff_index,
-								U[i],
-                                alpha_i_new_diff[p],
-								p+1
-                    	);
+                    	switch(solver){
+                    		case 1:	// use projected gradient descent Solver
+			                    	subSolve3(i,
+											cons[i][p].act_k_diff_index,
+										//	U[i][p],
+			                                alpha_i_new_diff[p],
+											p+1
+			                    	);                    		
+                    				break;
+                    		case 2: // use frank wolfe solver
+                    		        subSolve4(i,
+											cons[i][p].act_k_diff_index,
+										//	U[i][p],
+			                                alpha_i_new_diff[p],
+											p+1
+			                    	);
+                    				break;
+                    		case 3:
+                    				// use pair wise frank wolfe
+                    		        subSolve5(i,
+											cons[i][p].act_k_diff_index,
+											U[i][p],
+			                                alpha_i_new_diff[p],
+											p+1
+			                    	);
+                    				break;
+                    		case 4:
+                    				// use away-step frank wolfe
+                    		        subSolve6(i,
+											cons[i][p].act_k_diff_index,
+											U[i][p],
+			                                alpha_i_new_diff[p],
+											p+1
+			                    	);
+                    				break;
+    						default: cerr<<"Invalid Solver Option/ Terminating....";
+    								exit(1); 
+                    	}
                     }
                     subsolve_time += omp_get_wtime();
                     //maintain v =  X^T\alpha;  w = prox_{l1}(v);
@@ -707,7 +744,7 @@ class SplitOracleActBCD{
     		}
     		Float* x = new Float[n];
     		Float* y = new Float[m];
-    		solve_bi_simplex(n, m, b, c, C, x, y);
+    		solve_bi_simplex(n, m, b, c, C[0], x, y);
     		// negative set
     		for(int i=0,k=0;i<n;++i,++k){
     			alpha_i_new_neg[k]=-x[i];
@@ -807,7 +844,7 @@ class SplitOracleActBCD{
 
             Float* x = new Float[n];
             Float* y = new Float[m];
-            solve_bi_simplex(n, m, b, c, C, x, y);
+            solve_bi_simplex(n, m, b, c, C[0], x, y);
     		// negative set
     		for(int i=0,k=0;i<n;++i,++k){
     			alpha_i_new_neg[k]=-x[i];
@@ -829,7 +866,7 @@ class SplitOracleActBCD{
     		SparseVec* xi = data->at(I);
     		int n = act_k_neg_index.size();
     		Float* b = new Float[n];
-    		Float A = Q_diag[I]* (1+ decay_rate * iter);
+    		Float A = Q_diag[I]* (1+ decay_rate * (iter));
     		int i = 0, j = 0;
     		Float lf=1.0/(prec);
     		// negative set
@@ -848,7 +885,7 @@ class SplitOracleActBCD{
 
     		}
     		Float* x = new Float[n];
-    		project_to_simplex(x,b,n,C);
+    		project_to_simplex(x,b,n,C[prec-1]);
     		for(int i=0;i<n;++i){
     			alpha_i_new_neg[i]=x[i];
     		}
@@ -868,10 +905,12 @@ class SplitOracleActBCD{
             int n = act_k_neg_index.size();
             Float* d = new Float[n];
             Float* gradients= new Float[n];
+            Float* margin= new Float[n];
             int min_index=0,min_value=0;
             // initialize with all zeros
             memset(d,0.0, sizeof(Float)*n);
             memset(gradients,0.0, sizeof(Float)*n);
+            memset(margin,0.0, sizeof(Float)*n);
             // compute gradients
             int i = 0;
             Float lf=1.0/(prec);
@@ -882,8 +921,10 @@ class SplitOracleActBCD{
                 gradients[i] =0 ;
                 for (Labels::iterator it = k->begin();
                         it != k->end(); ++it) {
-                    if(*it>0)
+                    if(*it>0){
                         gradients[i]-=lf;
+                        margin[i]+=lf;
+                    }
                     gradients[i] += prod_cache[abs(*it)-1] * sign(*it);
                 }
                 ++i;
@@ -898,8 +939,9 @@ class SplitOracleActBCD{
                 inner_product+= gradients[j]* (-1*act_k_neg_index[j].second);
             	d[j]=-act_k_neg_index[j].second;
             }
-            inner_product+= C*gradients[min_index];
-            d[min_index]+=C;
+            // use seperate costs for different precisions
+            inner_product+= C[prec-1]*gradients[min_index];
+            d[min_index]+=C[prec-1];
 
             //compute the new alpha values
             //need to compute the step size using line search
@@ -922,8 +964,7 @@ class SplitOracleActBCD{
                         alpha_i_new_neg[i]=step_size*d[i];
                         alpha_i_new_neg[i]+= act_k_neg_index[i].second;
                         delta_alpha=alpha_i_new_neg[i]-act_k_neg_index[i].second;
-                        if(i!=0)  // since that is not part of objective (xi >=0)
-                        changes+=delta_alpha;
+                        changes+=margin[i]*delta_alpha;
                         // push this info into a map
                         // iterate over labels corresponding to this alpha
                         for(auto it:*(act_k_neg_index[i].first)){
@@ -954,10 +995,12 @@ class SplitOracleActBCD{
             int n = act_k_neg_index.size();
             Float* d = new Float[n];
             Float* gradients= new Float[n];
+            Float* margin= new Float[n];
             int min_index=0,min_value=0;
             // initialize with all zeros
             memset(d,0.0, sizeof(Float)*n);
             memset(gradients,0.0, sizeof(Float)*n);
+            memset(margin,0.0, sizeof(Float)*n);
             // compute gradients
             int i = 0;
             Float lf=1.0/(prec);
@@ -968,8 +1011,10 @@ class SplitOracleActBCD{
                 gradients[i] =0 ;
                 for (Labels::iterator it = k->begin();
                         it != k->end(); ++it) {
-                    if(*it>0)
+                    if(*it>0){
                         gradients[i]-=lf;
+                        margin[i]+=lf;
+                    }
                     gradients[i] += prod_cache[abs(*it)-1] * sign(*it);
                 }
                 ++i;
@@ -992,16 +1037,16 @@ class SplitOracleActBCD{
 
             // set the entry at min_index=C
             if(min_value<=0 && min_index!=-1){
-                d[min_index]=C;
+                d[min_index]=C[prec-1];
             }
             // set the entry at max_index,u as -C
-            	d[u]-=C;
+            	d[u]-=C[prec-1];
             //compute the new alpha values
             //need to compute the step size using line search
             Float step_size=1.0; // initial step size
             Float tau=0.5, c=0.5; // search control parameters
             Float m=0,t;
-            m= C*gradients[min_index]-C*gradients[u];  // m= d^T\delta f
+            m= C[prec-1]*gradients[min_index]-C[prec-1]*gradients[u];  // m= d^T\delta f
             t=-c*m;
             Float changes=0;
             Float delta_alpha;
@@ -1017,8 +1062,7 @@ class SplitOracleActBCD{
 		                alpha_i_new_neg[i]=step_size*d[i];
 		                alpha_i_new_neg[i]+= act_k_neg_index[i].second;
 		                delta_alpha=alpha_i_new_neg[i]-act_k_neg_index[i].second;
-		                if(i!=0)  // since that is not part of objective (xi >=0)
-		                changes+=delta_alpha;
+		                changes+=margin[i]*delta_alpha;
 		                // push this info into a map
 		                // iterate over labels corresponding to this alpha
 		                for(auto it:*(act_k_neg_index[i].first)){
@@ -1093,18 +1137,18 @@ class SplitOracleActBCD{
                     u=elem;
                 }
             }
-            inner_product+= C*(gradients[min_index]+gradients[u]);
+            inner_product+= C[prec-1]*(gradients[min_index]+gradients[u]);
             if(inner_product<=0){
             	for(int j=0;j<n;++j){
             		d[j]=-act_k_neg_index[j].second;
             	}
-            	d[min_index]+=C;
+            	d[min_index]+=C[prec-1];
             }
             else{
             	for(int j=0;j<n;++j){
             		d[j]=act_k_neg_index[j].second;
             	}
-            	d[u]-=C;
+            	d[u]-=C[prec-1];
 
             }
             //compute the new alpha values
@@ -1112,7 +1156,11 @@ class SplitOracleActBCD{
             Float step_size=1.0; // initial step size
             Float tau=0.5, c=0.5; // search control parameters
             Float m=0,t;
-            m= C*gradients[min_index]-C*gradients[u];  // m= d^T\delta f
+         	// compute m NOTE: this could be optimized to be calculated above also
+            // m= d^T\delta f
+			for(int j=0;j<n;++j){
+            	m+=d[j]*gradients[j];
+            }            
             t=-c*m;
             Float changes=0;
             Float delta_alpha;
@@ -1707,7 +1755,7 @@ class SplitOracleActBCD{
         Problem* train;
         HeldoutEval* heldoutEval;
         Float lambda;
-        Float C;
+        Float *C;
         vector<SparseVec*>* data;
         vector<Labels>* labels;
         int D; 
@@ -1715,6 +1763,7 @@ class SplitOracleActBCD{
         int K;
         // precision@k to optimize for
         int precision;
+        int solver;
         Float* Q_diag;
         HashClass* hashfunc;
         vector<Float>* cdf_sum;
@@ -1751,7 +1800,7 @@ class SplitOracleActBCD{
         //vector<pair<int, Float>>* act_k_index;
         // separate for positive and negative part of constraints
         constraints **cons;
-        vector<int> *U;
+        vector<int> **U;
         //for storing best model
         //vector<pair<int, Float>>* best_act_k_index;
         vector<int>* non_split_index;

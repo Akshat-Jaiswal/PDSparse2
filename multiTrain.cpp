@@ -11,9 +11,12 @@ void exit_with_help(){
 	cerr << "Usage: ./multiTrain (options) [train_data] (model)" << endl;	
 	#endif
 	cerr << "options:" << endl;
-	cerr << "-s solver: (default 1)" << endl;
-	cerr << "	0 -- Stochastic Block Coordinate Descent" << endl;
-	cerr << "	1 -- Stochastic-Active Block Coordinate Descent (PD-Sparse)" << endl;
+	cerr << "-s solver: (default 2)" << endl;
+	cerr << "	1 -- Stochastic-Active Block Coordinate Descent (Projected Gradient Descent)" << endl;
+	cerr << "	2 -- Stochastic-Active Block Coordinate Descent (Frank Wolfe)" << endl;
+	cerr << "	3 -- Stochastic-Active Block Coordinate Descent (Away Step Frank Wolfe)" << endl;
+	cerr << "	4 -- Stochastic-Active Block Coordinate Descent (Pair Wise Frank Wolfe)" << endl;
+
 	cerr << "-l lambda: L1 regularization weight (default 0.1)" << endl;
 	cerr << "-D decay: decay rate for step size (default 0.01)" << endl;
 	cerr << "-k precision@k: For Training  (default 1)" << endl;
@@ -48,7 +51,12 @@ void parse_cmd_line(int argc, char** argv, Param* param){
 				  break;
 			case 'D': param->decay = atof(argv[i]);
 				  break;
-			case 'c': param->C = atof(argv[i]);
+				  // special case read elements until the precison counts
+			case 'c': delete[] param->C;
+					  param->C = new Float[param->precision]; 
+					  for(int p=0;p< param->precision;++p)
+					  	param->C[p]=atof(argv[i++]);
+					  i--;
 				  break;
 			case 'r': param->speed_up_rate = atoi(argv[i]);
 				  break;
@@ -110,7 +118,7 @@ int main(int argc, char** argv){
 		Problem* heldout = new Problem();
 		readData( param->heldoutFname, heldout);
 		cerr << "heldout N=" << heldout->data.size() << endl;
-		param->heldoutEval = new HeldoutEval(heldout,param->precision);
+		param->heldoutEval = new HeldoutEval(heldout,1);
 	}
 	int D = train->D;
 	int K = train->K;
@@ -118,39 +126,11 @@ int main(int argc, char** argv){
 	cerr << "N=" << N << endl;
 	cerr << "d=" << (Float)nnz(train->data)/N << endl;
 	cerr << "D=" << D << endl; 
-	cerr << "K=" << K << endl;
-		
-	if( param->solver == 0 ){
-		
-/*
-		SBCDsolve* solver = new SBCDsolve(param);
-		Model* model = solver->solve();
-		model->writeModel(param->modelFname);
-*/
+	cerr << "K=" << K << endl;	
+	SplitOracleActBCD* solver = new SplitOracleActBCD(param);
+	Model* model = solver->solve();
+	model->writeModel(param->modelFname);
 	
-	}else if( param->solver==1 ){
-		SplitOracleActBCD* solver = new SplitOracleActBCD(param);
-		Model* model = solver->solve();
-		model->writeModel(param->modelFname);
-		
-		if( param->post_solve_iter > 0 ){
-			
-/*
-			param->post_solve_iter = min(solver->iter, param->post_solve_iter);
-			#ifdef USING_HASHVEC
-			PostSolve* postSolve = new PostSolve( param, model->w_hash_nnz_index, model->w, model->size_w, solver->act_k_index, solver->hashindices );
-			#else
-			PostSolve* postSolve = new PostSolve( param, model->w_hash_nnz_index, model->w, solver->act_k_index );
-			#endif
-			model = postSolve->solve();
-	
-			char* postsolved_modelFname = new char[FNAME_LEN];
-			sprintf(postsolved_modelFname, "%s.p", param->modelFname);
-			model->writeModel(postsolved_modelFname);
-			delete[] postsolved_modelFname;
-*/
-		}
-	}
 	
 	overall_time += omp_get_wtime();
 	cerr << "overall_time=" << overall_time << endl;
