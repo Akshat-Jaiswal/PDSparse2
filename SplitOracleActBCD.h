@@ -265,7 +265,7 @@ class SplitOracleActBCD{
                         subSolve7(i,			
                     		cons[i][p].act_k_pos_index,
 			                alpha_i_new_pos[p],
-							p+1
+							prec
 			            );
                         // now solve the negative part
                     	alpha_i_new_diff[p]= new Float[cons[i][p].act_k_neg_index.size()];
@@ -764,7 +764,7 @@ class SplitOracleActBCD{
                 if(changes>=step_size*t)
                     break;
                 step_size=tau*step_size;
-                if(step_size < 1e-5)
+                if(step_size < 1e-8)
                 	// early stop
                 	break;
             }
@@ -790,7 +790,9 @@ class SplitOracleActBCD{
 
             // compute gradients
             int i = 0;
-            Float lf=1.0/(prec);
+            // scale the margin accordingly
+            // margin= size of current set/ precision being optimized
+            Float lf=act_k_neg_index[0].first->size()/(prec);
             for (vector<pair<Labels*, Float>>::iterator it =
                     act_k_neg_index.begin(); it != act_k_neg_index.end(); it++) {
                 Labels* k = it->first;
@@ -847,7 +849,7 @@ class SplitOracleActBCD{
                 if(changes>=step_size*t)
                     break;
                 step_size=tau*step_size;
-                if(step_size < 1e-5)
+                if(step_size < 1e-8)
                 	// early stop
                 	break;
             }
