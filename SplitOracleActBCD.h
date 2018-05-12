@@ -663,8 +663,10 @@ class SplitOracleActBCD{
             cerr<<dual_obj<<" ";
             Float delta;
             Float alpha_sum=0;
+            Float lf;
             for (int i = 0; i < N; i++) {
     			int prec=labels->at(i).size();
+                Labels* yi = &(labels->at(i));
     			prec=prec<precision?prec:precision;
     			for(int p=0;p<prec;++p){
 					// substract dual variables corresponding to positive labels
@@ -675,6 +677,21 @@ class SplitOracleActBCD{
 						dual_obj -= alpha_ik;
                         alpha_sum+= alpha_ik;
 					}
+                    // add dual variables corresponding to negative labels
+                    lf= 1.0/(p+1);
+                    vector<pair<Labels*,Float>>& act_index2 = cons[i][p].act_k_neg_index;
+                    for (vector<pair<Labels*,Float>>::iterator it = act_index2.begin();
+                            it != act_index2.end(); it++) {
+                        Float alpha_ik = it->second;
+                        delta=0;
+                        for(auto label: *(it->first)){
+                            if(find(yi->begin(),yi->end(),label)!= yi->end())
+                                delta+=lf;
+                        }
+                        dual_obj += delta*alpha_ik;
+                        alpha_sum+= delta*alpha_ik;
+                    }
+
     			}
     		}
             cerr<<alpha_sum<<" ";
@@ -698,6 +715,7 @@ class SplitOracleActBCD{
             // initialize with all zeros
             memset(d,0.0, sizeof(Float)*n);
             memset(gradients,0.0, sizeof(Float)*n);
+            memset(margin,0.0, sizeof(Float)*n);
             // compute gradients
             int i = 0;
             Float lf=1.0/(prec);
@@ -708,6 +726,10 @@ class SplitOracleActBCD{
                 gradients[i] =0 ;
                 for (Labels::iterator it = k->begin();
                         it != k->end(); ++it) {
+                    if(find(yi->begin(),yi->end(),*it)!= yi->end()){
+                        margin[i]+=lf;
+                        gradients[i]+=lf;
+                    }
                     gradients[i] -= prod_cache[*it] ;
                 }
                 ++i;
@@ -749,8 +771,7 @@ class SplitOracleActBCD{
                         alpha_i_new_neg[i]=step_size*d[i];
                         alpha_i_new_neg[i]+= act_k_neg_index[i].second;
                         delta_alpha=alpha_i_new_neg[i]-act_k_neg_index[i].second;
-                        // change is only in quadratic part not in linear
-                        // changes+=margin[i]*delta_alpha;
+                        changes-=margin[i]*delta_alpha;
                         // push this info into a map
                         // iterate over labels corresponding to this alpha
                         // need to push -ve to tell that it should be substracted
@@ -770,6 +791,7 @@ class SplitOracleActBCD{
             }
             delete[] gradients;
             delete[] d;
+            delete[] margin;
         }
         /**
         *	Function to perform gradient descent step using line search (unconstrained)
@@ -855,6 +877,7 @@ class SplitOracleActBCD{
             }
             delete[] d;
             delete[] gradients;
+            delete[] margin;
         }
         /**
         *	Function returns the change in dual objective without changing the parameters 
