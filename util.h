@@ -96,7 +96,13 @@ double inner_prod(double* w, SparseVec* sv){
 		sum += w[it->first]*it->second;
 	return sum;
 }
-
+// expects x not equal to y
+int get_edge_index(int x, int y){
+	// make sure that x always contains min of both
+	if(x>y)
+		std::swap(x,y);
+	return (x*(x-1)/2)+y;
+}
 double prox_l1_nneg( double v, double lambda ){
 	
 	if( v < lambda )
