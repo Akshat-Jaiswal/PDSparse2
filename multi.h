@@ -227,6 +227,7 @@ class Param{
 	char* heldoutFname;
 	Float lambda; //for L1-norm (default 1/N)
 	Float *C; //weight of loss
+	Float C2; // weight for edges
 	int precision; // for precision@k training
 	Float decay; // decay rate for step size computation
 	int speed_up_rate; // speed up rate for sampling
@@ -249,6 +250,7 @@ class Param{
 		decay=0.01;
 		C= new Float[1];
 		C[0]= 1.0;
+		C2=1.0;
 		max_iter = 50;
 		max_select = -1;
 		speed_up_rate = -1;

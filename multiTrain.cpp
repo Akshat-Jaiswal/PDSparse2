@@ -20,6 +20,8 @@ void exit_with_help(){
 	cerr << "-l lambda: L1 regularization weight (default 0.1)" << endl;
 	cerr << "-D decay: decay rate for step size (default 0.01)" << endl;
 	cerr << "-k precision@k: For Training  (default 1)" << endl;
+	cerr << "-E weights for edges  (default 1.0)" << endl;
+
 
 	cerr << "-c cost: cost of each sample (default 1.0)" << endl;
 	cerr << "-r speed_up_rate: sample 1/r fraction of non-zero features to estimate gradient (default r = ceil(min( 5DK/(Clog(K)nnz(X)), nnz(X)/(5N) )) )" << endl;
@@ -57,6 +59,8 @@ void parse_cmd_line(int argc, char** argv, Param* param){
 					  for(int p=0;p< param->precision;++p)
 					  	param->C[p]=atof(argv[i++]);
 					  i--;
+				  break;
+			case 'E': param->C2 = atof(argv[i]);
 				  break;
 			case 'r': param->speed_up_rate = atoi(argv[i]);
 				  break;
