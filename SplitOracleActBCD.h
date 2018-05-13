@@ -139,7 +139,6 @@ class SplitOracleActBCD{
     		delete[] hashindices;
             delete[] non_split_index;	
             delete[] w_hash_nnz_index;
-            delete[] e_hash_nnz_index;
         }
 
         Model* solve(){
@@ -195,8 +194,6 @@ class SplitOracleActBCD{
                     w_hash_nnz_index[j][S].clear();
                 }
             }
-            // non zero index array for edges
-            e_hash_nnz_index= new vector<int>;
             //initialize Q_diag (Q=X*X') for the diagonal Hessian of each i-th subproblem
             Q_diag = new Float[N];
             for(int i=0;i<N;i++){
@@ -310,10 +307,10 @@ class SplitOracleActBCD{
                             // update nodes
                             for (Labels::iterator it2 = it->first->begin();
 									it2 != it->first->end(); ++it2) {
-								if (actives.find(-(*it2)-1) == actives.end()) {
-									actives[-(*it2)-1] = 0;
+								if (actives.find((*it2)) == actives.end()) {
+									actives[(*it2)] = 0;
 								}
-								actives[-(*it2)-1] += delta_alpha;
+								actives[(*it2)] -= delta_alpha;
                                 // update edges
                                 // find out the new edges that gets added by addition of this node
                                 for(auto node: already_present_nodes){  
@@ -321,11 +318,10 @@ class SplitOracleActBCD{
                                     // add offset to it
                                     index+=K;
                                     // add them to map for update
-                                    // - sign to indicate the this delta has to be substracted
-                                    if (actives.find(-(index+1)) == actives.end()) {
-                                        actives[-(index+1)] = 0;
+                                    if (actives.find(index) == actives.end()) {
+                                        actives[index] = 0;
                                     }
-                                    actives[-(index+1)] += delta_alpha;    
+                                    actives[index] -= delta_alpha;    
                                 }
                                 // add this to node collection
                                 already_present_nodes.push_back(*it2);
@@ -342,10 +338,10 @@ class SplitOracleActBCD{
 	                        already_present_nodes.clear();
                             for (Labels::iterator it2 = it->first->begin();
 									it2 != it->first->end(); ++it2) {
-								if (actives.find((*it2)+1) == actives.end()) {
-									actives[(*it2)+1] = 0;
+								if (actives.find((*it2)) == actives.end()) {
+									actives[(*it2)] = 0;
 								}
-								actives[(*it2)+1] += delta_alpha;
+								actives[(*it2)] += delta_alpha;
                                 // update edges
                                 // find out the new edges that gets added by addition of this node
                                 for(auto node: already_present_nodes){  
@@ -354,10 +350,11 @@ class SplitOracleActBCD{
                                     index+=K;
                                     // add them to map for update
                                     // + sign to indicate the this delta has to be added
-                                    if (actives.find((index+1)) == actives.end()) {
-                                        actives[(index+1)] = 0;
+                                    if (actives.find(index) == actives.end()) {
+                                        actives[index] = 0;
                                     }
-                                    actives[(index+1)] += delta_alpha;    
+                                    actives[index] += delta_alpha;
+                                    // cerr<<index<<":"<<delta_alpha<<"";    
                                 }
                                 // add this to node collection
                                 already_present_nodes.push_back(*it2);
@@ -379,11 +376,10 @@ class SplitOracleActBCD{
     							it2 != actives.end(); it2++) {
     						int k = it2->first;
     						Float delta_alpha = it2->second;
-    						if(k<0){
-    							k=-k;
-    							delta_alpha=-delta_alpha;
-    						}
-    						k--;
+                            // if its an edge parameter
+                            if(k >= K)
+                                break;
+
                             if( fabs(delta_alpha) < EPS )
                                 continue;
                             //update v, w
@@ -412,11 +408,10 @@ class SplitOracleActBCD{
     							it2 != actives.end(); it2++) {
     						k = it2->first;
     						Float delta_alpha = it2->second;
-    						if(k<0){
-    						    k=-k;
-    						    delta_alpha=-delta_alpha;
-    						}
-    						k--;
+                            // if its an edge parameter
+                            if(k >= K)
+                                break;
+
     						if (fabs(delta_alpha) < EPS)
     							continue;
     						//update v, w
@@ -428,6 +423,7 @@ class SplitOracleActBCD{
     						vj[k] = make_pair(vjk, wjk);
                             if (wjk_old != wjk) {
     							if (fabs(wjk_old) < EPS) {
+                                    // cerr<<k<<endl;
     								wJ[loc(k)].push_back(k);
     							}
     						}
@@ -438,14 +434,9 @@ class SplitOracleActBCD{
                     // now we need to update the edge primal parameters
                     for (itx = actives.lower_bound(K); itx != actives.end();
                             ++itx) {
+                        // cerr<<"i";
                         int k = itx->first;
                         delta_alpha = itx->second;
-                        // restore the edge index
-                        if(k<0){
-                            k=-k;
-                            delta_alpha=-delta_alpha;
-                        }
-                        k--;
                         k -= K; // remove the offset
                         if (fabs(delta_alpha) < EPS)
                             continue;
@@ -454,12 +445,8 @@ class SplitOracleActBCD{
                         Float Ek = prox_l1_nneg(vk, C2);
                         Float Ek_old = vk_Ek.second;
                         ve[k] = make_pair(vk, Ek);
-                        if (Ek_old != Ek) {
-                            if (fabs(Ek_old) < EPS) {
-                                e_hash_nnz_index->push_back(k);
-                            }
-                        }
                     }
+
     				//update alphas for each set
                     for(int p=0;p<prec;++p){
 						bool has_zero = 0;
@@ -734,14 +721,12 @@ class SplitOracleActBCD{
                 }
             }
             Float edge_sum=0;
-            unordered_set<int> already_in;
-            for(auto edge: *e_hash_nnz_index){
-                if(already_in.find(edge)==already_in.end()){
-                    edge_sum+= ve[edge].second;
-                    dual_obj+= ve[edge].second* ve[edge].second;
-                    already_in.insert(edge);
-                }
+
+            for(int i=0;i<K*(K-1)/2;++i){
+                edge_sum+=ve[i].second;
+                dual_obj+=ve[i].second*ve[i].second;
             }
+
             dual_obj /= 2.0;
             Float delta;
             Float alpha_sum=0;
@@ -1189,6 +1174,7 @@ class SplitOracleActBCD{
                         for(auto e:need)
                         	terminate &= e==0;
                     }
+                    delete[] max_indices;
         }
         void search_active_i_graph_brute_force(int I, constraints *cons, int prec) {
                     //prod_cache should be all zero
@@ -1262,6 +1248,7 @@ class SplitOracleActBCD{
                             actives[p].insert(hash);
                         }
                     }
+                    max_select=1;
                     // first find for k=1
                     int partial_length= yi->size()+ cons[0].act_k_neg_index.size()+ max_select;
                     partial_length= partial_length<K? partial_length:K;
@@ -1309,7 +1296,7 @@ class SplitOracleActBCD{
                         ybar->push_back(max_pair.second);
                         cons[1].act_k_neg_index.push_back(make_pair(ybar,0.0));
                     }
-
+                delete[] max_indices;
         }
 
         //store the best model as well as necessary indices
@@ -1410,12 +1397,9 @@ class SplitOracleActBCD{
             unordered_set<int> already_in;
             ofstream fout2("edges.txt");
             memset(E, 0.0, K*(K-1)/2);
-            for(auto edge: *e_hash_nnz_index){
-                if(already_in.find(edge)!= already_in.end()){
-                    E[edge]= ve[edge].second;
-                    already_in.insert(edge);
-                    fout2<<edge<<":"<<ve[edge].second<<" ";
-                }
+            for(int i=0;i< K*(K-1)/2;++i){
+                E[i]=ve[i].second;
+                fout2<<E[i]<<" ";
             }
             fout2<<endl;
             fout2.close();
@@ -1442,7 +1426,6 @@ class SplitOracleActBCD{
         vector<Float>* cdf_sum;
         HashVec** w_temp;
         vector<int>** w_hash_nnz_index;
-        vector<int>* e_hash_nnz_index;
 
         int max_iter;
         vector<int>* k_index;
