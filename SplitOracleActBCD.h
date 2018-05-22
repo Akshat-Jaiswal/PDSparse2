@@ -259,7 +259,7 @@ class SplitOracleActBCD{
 #endif
                     //search active variable
                     search_time -= omp_get_wtime();
-                    search_active_i_graph_brute_force(i,cons[i],prec);
+                    search_active_i_graph(i,cons[i],prec);
                     search_time += omp_get_wtime();
                     //solve subproblem
                     subsolve_time -= omp_get_wtime();
@@ -1115,6 +1115,7 @@ class SplitOracleActBCD{
 						}
                     }
                     // now need to partial sort on the basis of scores
+                    max_select=1;
                     int partial_length=yi->size()+ max_elements +max_select;
                     partial_length= partial_length<K? partial_length:K;
             		nth_element(max_indices, max_indices+partial_length, max_indices+K, ScoreComp(prod_cache));
@@ -1150,7 +1151,6 @@ class SplitOracleActBCD{
                                         // add this to active set
                                         cons[j].act_k_neg_index.push_back(make_pair(ybar,0.0));
                                         need[j]--;
-                                        break;
                                     }
                                     // else do nothing
                                 }
@@ -1266,34 +1266,54 @@ class SplitOracleActBCD{
                     }
                     // iterate overall all possible label combinations and check if they are present or not
                     if(k>=2){
+                        // let use some approximation scheme
+                        // only take top sqrt(K) for searching
+                        for(int i=0;i<K;++i){
+                            max_indices[i]=i;
+                        }   
+                        int partial_length = cons[1].act_k_neg_index.size()
+                                            +cons[1].act_k_pos_index.size()+ ceil(sqrt(K));
+                        partial_length= partial_length<K? partial_length:K;
+                        // find top elements
+                        nth_element(max_indices, max_indices+partial_length, max_indices+K, ScoreComp(prod_cache));
                         Float max_score=-9999;
                         Float score;
                         pair<int,int> max_pair;
                         vector<int> combination;
-                        for(int i=0;i<K;++i){
-                            for(int j=0;j<K;++j){
-                                if(j>=i)
-                                    break;
+                        for(int i=0;i<partial_length;++i){
+                            for(int j=0;j<i;++j){
                                 combination.clear();
                                 // insert in sorted order
-                                combination.push_back(j);
-                                combination.push_back(i);
+                                if(max_indices[i]<max_indices[j]){
+                                    combination.push_back(max_indices[i]);
+                                    combination.push_back(max_indices[j]);
+                                }else{
+                                    combination.push_back(max_indices[j]);
+                                    combination.push_back(max_indices[i]);
+                                }
                                 long long hash=gethash(combination);
                                 if(actives[1].find(hash)!= actives[1].end()){
                                     // compute their scores 
                                     // and store if it crosses max_score
-                                    score= prod_cache[j]+prod_cache[i];
-                                    int index= get_edge_index(i,j);
+                                    score= prod_cache[max_indices[j]]+prod_cache[max_indices[i]];
+                                    int index= get_edge_index(max_indices[i],max_indices[j]);
                                     score+= ve[index].second;
                                     if(score>max_score){
-                                        max_pair=make_pair(j,i);
+                                        max_pair=make_pair(max_indices[j],max_indices[i]);
+                                        max_score=score;
                                     }
                                 }
                             }
                         }
                         Labels *ybar=new Labels();
-                        ybar->push_back(max_pair.first);
-                        ybar->push_back(max_pair.second);
+                        // insert in sort order
+                        if(max_pair.first < max_pair.second){
+                            ybar->push_back(max_pair.first);
+                            ybar->push_back(max_pair.second);
+                        }else{
+                            ybar->push_back(max_pair.second);
+                            ybar->push_back(max_pair.first);             
+                        }
                         cons[1].act_k_neg_index.push_back(make_pair(ybar,0.0));
                     }
                 delete[] max_indices;
