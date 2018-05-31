@@ -31,6 +31,7 @@ void exit_with_help(){
 	cerr << "-g max_select: maximum number of dual variables selected during search (default: -1 (i.e. dynamically adjusted during iterations) )" << endl;
 	cerr << "-p post_train_iter: #iter of post-training without L1R (default auto)" << endl;
 	cerr << "-h <file>: using accuracy on heldout file '<file>' to terminate iterations" << endl;
+	cerr << "-T <file>: Embeddings File" << endl;
 	cerr << "-e early_terminate: how many iterations of non-increasing heldout accuracy required to earyly stop (default 3)" << endl;
 	cerr << "-d : dump model file when better heldout accuracy is achieved, model files will have name (model).<iter>" << endl;
 	exit(0);
@@ -81,6 +82,9 @@ void parse_cmd_line(int argc, char** argv, Param* param){
 			case 'h': param->heldoutFname = argv[i];
 				  param->max_iter=INF;
 				  break;
+			case 'T': param->embeddingFname = argv[i];
+				  break;
+
 			case 'd': param->dump_model = true; --i;
 				  break;
 			default:

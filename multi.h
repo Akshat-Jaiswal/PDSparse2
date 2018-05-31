@@ -133,9 +133,19 @@ class HeldoutEval{
 	#endif
 	
 	#ifdef USING_HASHVEC
-	double calcAcc(pair<int, pair<Float, Float>>** v, int* size_v, vector<int>**& nnz_index, int*& hashindices, int split_up_rate){
+	double calcAcc(pair<int, pair<Float, Float>>** v,
+		pair<Float, Float>* ve,
+		vector<Float> *embeddings,
+	  	int* size_v,
+	  	vector<int>**& nnz_index,
+	  	int*& hashindices,
+	  	int split_up_rate){
 	#else
-	double calcAcc(pair<Float, Float>** v, vector<int>**& nnz_index, int split_up_rate){
+	double calcAcc(pair<Float, Float>** v,
+		pair<Float, Float>* ve,
+		vector<Float> *embeddings,
+		vector<int>**& nnz_index,
+		int split_up_rate){
 	#endif
 		vector<SparseVec*>* data = &(heldout->data);
 		vector<Labels>* labels = &(heldout->labels);
@@ -144,6 +154,12 @@ class HeldoutEval{
 		for(int i=0;i<heldout->N;i++){
 			memset(prod, 0.0, sizeof(Float)*K);
 			
+			// add embedding scores to prod already
+			for(int k=0;k< K;++k){
+				for(int j=0;j< embeddings[k].size();++j){
+					prod[k]+= ve[j].second* embeddings[k][j];
+				}
+			}
 			SparseVec* xi = data->at(i);
 			Labels* yi = &(labels->at(i));
 			
@@ -223,6 +239,7 @@ class HeldoutEval{
 class Param{
 	public:
 	char* trainFname;
+	char* embeddingFname;
 	char* modelFname;
 	char* heldoutFname;
 	Float lambda; //for L1-norm (default 1/N)
@@ -258,7 +275,8 @@ class Param{
 		using_importance_sampling = true;
 		post_solve_iter = INF;
 		early_terminate = 3;
-		heldoutFname == NULL;
+		heldoutFname = NULL;
+		embeddingFname = NULL;
 		train = NULL;
 		dump_model = false;
 	}
@@ -280,7 +298,8 @@ class Model{
 	}
 
 	#ifdef USING_HASHVEC
-	Model(Problem* prob, vector<int>* _w_hash_nnz_index, pair<int, Float>** _w, int* _size_w, int* _hashindices){
+	Model(Problem* prob, vector<int>* _w_hash_nnz_index, pair<int, Float>** _w, int* _size_w, int* _hashindices
+		 Float* _E, int _ED ){
 		D = prob->D;
 		K = prob->K;
 		label_name_list = &(prob->label_name_list);
@@ -288,19 +307,23 @@ class Model{
 		w_hash_nnz_index = _w_hash_nnz_index;	
 		w = _w;
 		size_w = _size_w;
-                hashindices = _hashindices;
+        hashindices = _hashindices;
+		E = _E;
+		ED = _ED;
 	}
 	pair<int, Float>** w;
 	int* size_w;
 	int* hashindices;
 	#else
-	Model(Problem* prob, vector<int>* _w_hash_nnz_index, Float** _w){
+	Model(Problem* prob, vector<int>* _w_hash_nnz_index, Float** _w, Float* _E, int _ED){
 		D = prob->D;
 		K = prob->K;
 		label_name_list = &(prob->label_name_list);
 		label_index_map = &(prob->label_index_map);
 		w_hash_nnz_index = _w_hash_nnz_index;
 		w = _w;
+		E = _E;
+		ED = _ED;
 	}
 	Float** w;
 	#endif
@@ -338,14 +361,22 @@ class Model{
 #endif
 			fout << endl;
 		}
-		fout.close();
-		
+		// write down the embedding parameters
+		fout << "embeddings_dimensions "<< ED <<endl;
+		int i;
+		for(i=0;i< ED-1;++i){
+			fout<<E[i]<<" ";
+		}
+		fout<<E[i]<<endl;
+		fout.close();		
 	}
 
 	HashVec** Hw;
 	vector<int>* w_hash_nnz_index;	
 	int D;
 	int K;
+	int ED;
+	Float *E; // embedding parameters
 	vector<string>* label_name_list;
 	map<string,int>* label_index_map;
 };
@@ -361,10 +392,35 @@ class StaticModel{
 	SparseVec* w;
 	int D;
 	int K;
+	int ED;
+	vector<Float> E;
 	vector<string>* label_name_list;
 	map<string,int>* label_index_map;
 };
 
+
+vector<Float>* readEmbeddings(char* fname, map<string,int> &label_index_map){
+	int label;
+	Float val;
+	int K, ED;
+	ifstream fin(fname);
+	vector<Float>* embeddings;
+	// read the first line to know dimensions of embeddings
+	fin>>K>>ED;
+	embeddings= new vector<Float>[K-1];
+	// read K-1 line to ignore <unk>
+	for(int i=0;i<K;++i){
+		fin>>label;
+		// convert label to model label space
+		int index= label_index_map[to_string(label)];
+		for(int j=0;j<ED;++j){
+			fin>>val;
+			embeddings[index].push_back(val);
+		}
+	}
+	fin.close();
+	return embeddings;
+}
 void readData(char* fname, Problem* prob)
 {
 	map<string,int>* label_index_map = &(prob->label_index_map);

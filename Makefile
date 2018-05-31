@@ -34,11 +34,11 @@ LSHTCwiki_original: examples/$$@/
 
 rcv1_regions:  examples/$$@/
 	$(eval base := examples/$@/$@)
-	make train_without_hash train_file=$(base).train heldout_file=$(base).heldout test_file=$(base).test split_up_rate="-q 1" 
+	make train_without_hash train_file=$(base).train heldout_file=$(base).heldout embeddings_file=$(base).embeddings test_file=$(base).test split_up_rate="-q 1" 
 
 bibtex: examples/$$@/
 	$(eval base := examples/$@/$@)
-	make train_without_hash train_file=$(base).train heldout_file=$(base).heldout test_file=$(base).test sample_option="-u" early_terminate="-e 10" speed_up_rate="-r 1" 
+	make train_without_hash train_file=$(base).train heldout_file=$(base).heldout embeddings_file=$(base).embeddings test_file=$(base).test sample_option="-u" early_terminate="-e 10" speed_up_rate="-r 1" 
 
 scene2: examples/$$@/
 	$(eval base := examples/$@/$@)
@@ -109,22 +109,24 @@ imageNet: examples/$$@/
 	$(eval base := examples/$@/$@)
 	make train_with_hash train_file=$(base).train heldout_file=$(base).heldout test_file=$(base).test split_up_rate="-q 3"
 
-train_without_hash: multiTrain multiPred $(train_file) $(heldout_file) $(test_file)
-	./multiTrain $(cost) $(lambda) $(solver) $(speed_up_rate) $(early_terminate) $(max_iter) $(split_up_rate) $(max_select) $(post_train_iter) $(sample_option) $(misc) -h $(heldout_file) $(train_file) $(output_model)
+train_without_hash: multiTrain multiPred $(train_file) $(heldout_file) $(test_file) $(embeddings_file)
+	rm -f dumps/*
+	./multiTrain $(cost) $(lambda) $(solver) $(speed_up_rate) $(early_terminate) $(max_iter) $(split_up_rate) $(max_select) $(post_train_iter) $(sample_option) $(misc) -h $(heldout_file) -T $(embeddings_file) $(train_file) $(output_model)
 	@echo "testing model before post solve"
-	./multiPred $(heldout_file) $(output_model) $(top)
-	./multiPred $(test_file) $(output_model) $(top)
+	./multiPred $(embeddings_file) $(heldout_file) $(output_model) $(top)
+	./multiPred $(embeddings_file) $(test_file) $(output_model) $(top)
 ifneq ($(p), 0)
 	@echo "testing model after post solve"
 	./multiPred $(heldout_file) $(output_model).p $(top)
 	./multiPred $(test_file) $(output_model).p $(top)
 endif
 
-train_with_hash: multiTrainHash multiPred $(train_file) $(heldout_file) $(test_file)
-	./multiTrainHash $(cost) $(lambda) $(solver) $(speed_up_rate) $(early_terminate) $(max_iter) $(split_up_rate) $(max_select) $(post_train_iter) $(sample_option) $(misc) -h $(heldout_file) $(train_file) $(output_model)
+train_with_hash: multiTrainHash multiPred $(train_file) $(heldout_file) $(test_file) $(embeddings_file)
+	rm -f dumps/*
+	./multiTrainHash $(cost) $(lambda) $(solver) $(speed_up_rate) $(early_terminate) $(max_iter) $(split_up_rate) $(max_select) $(post_train_iter) $(sample_option) $(misc) -h $(heldout_file) -T $(embeddings_file) $(train_file) $(output_model)
 	@echo "testing model before post solve"
-	./multiPred $(heldout_file) $(output_model) $(top)
-	./multiPred $(test_file) $(output_model) $(top)
+	./multiPred $(embeddings_file) $(heldout_file) $(output_model) $(top)
+	./multiPred $(embeddings_file) $(test_file) $(output_model) $(top)
 ifneq ($(p), 0)
 	@echo "testing model after post solve"
 	./multiPred $(heldout_file) $(output_model).p $(top)

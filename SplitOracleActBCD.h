@@ -37,7 +37,10 @@ class SplitOracleActBCD{
             if (param->dump_model){
                 modelFname =string( param->modelFname);
             }
-
+            // load embeddings
+            embeddings=readEmbeddings(param->embeddingFname, train->label_index_map);
+            ED= embeddings[0].size();
+            cerr<<"Embedding Size="<<ED<<endl;
             //a random permutation
             hashfunc = new HashClass(K);
             hashindices = hashfunc->hashindices;
@@ -135,7 +138,7 @@ class SplitOracleActBCD{
     			}
     		}
     		delete[] cons;
-
+            delete[] embeddings;
     		delete[] hashindices;
             delete[] non_split_index;	
             delete[] w_hash_nnz_index;
@@ -179,12 +182,12 @@ class SplitOracleActBCD{
                 memset(w[j], 0.0, sizeof(Float)*K);
             }
 #endif
-            ve = new pair<Float, Float> [K * (K - 1) / 2];
-            for (int k = 0; k < K * (K - 1) / 2; k++) {
+            ve = new pair<Float, Float> [ED];
+            for (int k = 0; k < ED; k++) {
                 ve[k] = make_pair(0.0, 0.0);
             }
             // for storing best model
-            E= new Float[K * ( K - 1 ) / 2];
+            E= new Float[ED];
 
             //initialize non-zero index array w
             w_hash_nnz_index = new vector<int>*[D];
@@ -291,8 +294,6 @@ class SplitOracleActBCD{
     				int ind ;
     				actives.clear();
     				Float delta_alpha;
-    				// identify active labels for each of sets of size k
-                    vector<int> already_present_nodes;
     				for(int p=0;p<prec;++p){
 						vector<pair<Labels*,Float>>& act_k_index_neg=
 								cons[i][p].act_k_neg_index;
@@ -302,8 +303,6 @@ class SplitOracleActBCD{
 								act_k_index_neg.begin(); it != act_k_index_neg.end();
 								it++) {
 							delta_alpha = alpha_i_new_diff[p][ind++] - it->second;
-                            // currently no nodes are present
-                            already_present_nodes.clear();
                             // update nodes
                             for (Labels::iterator it2 = it->first->begin();
 									it2 != it->first->end(); ++it2) {
@@ -311,20 +310,14 @@ class SplitOracleActBCD{
 									actives[(*it2)] = 0;
 								}
 								actives[(*it2)] -= delta_alpha;
-                                // update edges
-                                // find out the new edges that gets added by addition of this node
-                                for(auto node: already_present_nodes){  
-                                    int index= get_edge_index(node,*it2);
-                                    // add offset to it
-                                    index+=K;
-                                    // add them to map for update
+                                // update embedding parameters
+                                for(int j=0;j<ED;++j){
+                                    int index= j+K; // add the offset
                                     if (actives.find(index) == actives.end()) {
                                         actives[index] = 0;
                                     }
-                                    actives[index] -= delta_alpha;    
+                                    actives[index] -= delta_alpha* embeddings[*it2][j];
                                 }
-                                // add this to node collection
-                                already_present_nodes.push_back(*it2);
 							}
 						}
 						ind=0;
@@ -335,29 +328,19 @@ class SplitOracleActBCD{
 								act_k_index_pos.begin(); it != act_k_index_pos.end();
 								it++) {
 							delta_alpha = alpha_i_new_pos[p][ind++] - it->second;;
-	                        already_present_nodes.clear();
                             for (Labels::iterator it2 = it->first->begin();
 									it2 != it->first->end(); ++it2) {
 								if (actives.find((*it2)) == actives.end()) {
 									actives[(*it2)] = 0;
 								}
 								actives[(*it2)] += delta_alpha;
-                                // update edges
-                                // find out the new edges that gets added by addition of this node
-                                for(auto node: already_present_nodes){  
-                                    int index= get_edge_index(node,*it2);
-                                    // add offset to it
-                                    index+=K;
-                                    // add them to map for update
-                                    // + sign to indicate the this delta has to be added
+                                for(int j=0;j<ED;++j){
+                                    int index= j+K; // add the offset
                                     if (actives.find(index) == actives.end()) {
                                         actives[index] = 0;
                                     }
-                                    actives[index] += delta_alpha;
-                                    // cerr<<index<<":"<<delta_alpha<<"";    
+                                    actives[index] += delta_alpha* embeddings[*it2][j];
                                 }
-                                // add this to node collection
-                                already_present_nodes.push_back(*it2);
 
 							}
 						}
@@ -431,7 +414,7 @@ class SplitOracleActBCD{
 #endif
                     }
                     std::map<int, Float>::iterator itx;
-                    // now we need to update the edge primal parameters
+                    // now we need to update the embedding primal parameters
                     for (itx = actives.lower_bound(K); itx != actives.end();
                             ++itx) {
                         // cerr<<"i";
@@ -442,7 +425,7 @@ class SplitOracleActBCD{
                             continue;
                         pair<Float, Float> vk_Ek = ve[k];
                         Float vk = vk_Ek.first + delta_alpha;
-                        Float Ek = prox_l1_nneg(vk, C2);
+                        Float Ek = prox_l1(vk, C2);
                         Float Ek_old = vk_Ek.second;
                         ve[k] = make_pair(vk, Ek);
                     }
@@ -537,9 +520,9 @@ class SplitOracleActBCD{
                 //early terminate: if heldout_test_accuracy does not increase in last <early_terminate> iterations, stop!	
                 if( heldoutEval != NULL){
 #ifdef USING_HASHVEC
-                    Float heldout_test_acc = heldoutEval->calcAcc(v, size_v, w_hash_nnz_index, hashindices, split_up_rate);
+                    Float heldout_test_acc = heldoutEval->calcAcc(v,ve, embeddings, size_v, w_hash_nnz_index, hashindices, split_up_rate);
 #else
-                    Float heldout_test_acc = heldoutEval->calcAcc(v, w_hash_nnz_index, split_up_rate);
+                    Float heldout_test_acc = heldoutEval->calcAcc(v,ve, embeddings, w_hash_nnz_index, split_up_rate);
 #endif
 
 /*                  Float heldout_test_acc=evaluate_xi(); 
@@ -549,7 +532,7 @@ class SplitOracleActBCD{
                         dual=dual_cur;
                         store_best_model();
                         if (dump_model){
-                            string name = modelFname + "." + to_string(iter);
+                            string name = "dumps/"+ modelFname + "." + to_string(iter);
                             char* fname = new char[name.length()+1];
                             strcpy(fname, name.c_str());
                             cerr << ", dump_model_file=" << fname;
@@ -573,17 +556,6 @@ class SplitOracleActBCD{
             f_dual.close();
             cerr << endl;
 
-            //recover act_k_index to the best state so far
-            //This is because act_k_index is not a part of model, but we might need to use act_k_index possibly in Post Solve
-/*
-            if (best_act_k_index != NULL){
-                for (int i = 0; i < N; i++){
-                    act_k_index_neg[i] = best_act_k_index_neg[i];
-                    act_k_index_pos[i] = best_act_k_index_pos[i];
-
-                }
-            }
-*/
             if (best_model == NULL){
                 store_best_model();
             }
@@ -606,83 +578,6 @@ class SplitOracleActBCD{
             delete cdf_sum;
             delete[] index;
             return best_model;
-        }
-
-        //compute 1/2 \|w\|_2^2 + \sum_{i,k: k \not \in y_i} alpha_{i, k}
-        Float evaluate_xi(){
-        	int counts=0;
-        	bool flag;
-        	Float psi,min_score,max_score,scores;
-        	int S=0;
-        	for(int I=0;I<N;++I){
-        	// compute the new updated scores for each label
-//compute <xi,wk> for k=1...K
-            		Labels* yi = &(labels->at(I));
-            		SparseVec* xi = data->at(I);
-            		// calculate the scores for each class
-            		memset(prod_cache, 0.0, sizeof(Float) * K);
-            		for (SparseVec::iterator current_index = xi->begin();
-            				current_index < xi->end(); current_index++) {
-            			Float xij = current_index->second;
-            			int j = current_index->first;
-            			vector<int>& wjS = w_hash_nnz_index[j][S];
-            			if (wjS.size() == 0)
-            				continue;
-            			int k = 0, ind = 0;
-            #ifdef USING_HASHVEC
-            			int size_vj0 = size_v[j] - 1;
-            #endif
-            			Float wjk = 0.0;
-            			auto vj = v[j];
-            			for (vector<int>::iterator it2 = wjS.begin(); it2 != wjS.end();
-            					it2++) {
-            				k = *(it2);
-            #ifdef USING_HASHVEC
-            				int index_v = 0;
-            				find_index(vj, index_v, k, size_vj0, hashindices);
-            				wjk = vj[index_v].second.second;
-            #else
-            				wjk = vj[k].second;
-            #endif
-                            if (wjk == 0.0 || inside[k]){
-                                *it2=*(wjS.end()-1);
-                                wjS.erase(wjS.end()-1);
-                                it2--;
-                                continue;
-                            }
-                            inside[k] = true;
-            				prod_cache[k] += wjk * xij;
-            			}
-            			for (vector<int>::iterator it2 = wjS.begin(); it2 != wjS.end(); it2++){
-                            inside[*it2] = false;
-                        }
-            		}
-            	// now check if all the constraints are satisfied
-            		psi=0;
-            		flag=true;
-            		min_score=9999;
-            		max_score=-9999;
-            		for(auto elem:cons[I][0].act_k_pos_index){
-            			Labels* vec=elem.first;
-            			scores=0;
-            			for(auto k:*vec){
-            				scores+= prod_cache[k];
-            			}
-            			min_score=min_score<scores?min_score:scores;
-            		}
-            		for(auto elem:cons[I][0].act_k_neg_index){
-            			Labels* vec=elem.first;
-            			scores=0;
-            			for(auto k:*vec){
-            				scores+= prod_cache[k];
-            			}
-            			max_score=max_score>scores?max_score:scores;
-            		}
- 
-            		if(min_score>max_score)
-            			counts++;
-        	}
-        	return counts*1.0/N;
         }
         Float dual_obj(){
             Float dual_obj = 0.0;
@@ -722,7 +617,7 @@ class SplitOracleActBCD{
             }
             Float edge_sum=0;
 
-            for(int i=0;i<K*(K-1)/2;++i){
+            for(int i=0;i<ED;++i){
                 edge_sum+=ve[i].second;
                 dual_obj+=ve[i].second*ve[i].second;
             }
@@ -787,13 +682,11 @@ class SplitOracleActBCD{
             // compute gradients
             int i = 0;
             Float lf=1.0/(prec);
-            std::vector<int> already_present_nodes;
             for (vector<pair<Labels*, Float>>::iterator it =
                     act_k_neg_index.begin(); it != act_k_neg_index.end(); it++) {
                 Labels* k = it->first;
                 Float alpha_ik = it->second;
                 gradients[i] =0 ;
-                already_present_nodes.clear();
                 for (Labels::iterator it = k->begin();
                         it != k->end(); ++it) {
                     if(find(yi->begin(),yi->end(),*it)!= yi->end()){
@@ -801,16 +694,6 @@ class SplitOracleActBCD{
                         gradients[i]+=lf;
                     }
                     gradients[i] -= prod_cache[*it] ;
-                    // find out edge scores also
-                    for(auto node: already_present_nodes){
-                        if(node == *it){
-                            cerr<<"Some Error in Edge Indexing or Finding Constraints:"<<node;
-                            exit(10);
-                        }
-                        int index= get_edge_index(node,*it);
-                        gradients[i] -= ve[index].second;
-                    }
-                    already_present_nodes.push_back(*it);
                 }
                 ++i;
             }
@@ -856,9 +739,16 @@ class SplitOracleActBCD{
                         // iterate over labels corresponding to this alpha
                         // need to push -ve to tell that it should be substracted
                         for(auto it:*(act_k_neg_index[i].first)){
-                            if(actives.find(-it-1)==actives.end())
-                                actives[-it-1]=0.0;
-                            actives[-it-1]+=delta_alpha;
+                            if(actives.find(it)==actives.end())
+                                actives[it]=0.0;
+                            actives[it]-=delta_alpha;
+                            // update embedding parameters using this label
+                            for(int j=0;j< ED;++j){
+                                int index=j+K;  // add the offset to seperate it from node parameters   
+                                if(actives.find(index)==actives.end())
+                                    actives[index]=0.0;
+                                actives[index]-=delta_alpha* embeddings[it][j];
+                            }
                         }
                     }
                 changes+=calculate_change(I,actives);
@@ -895,7 +785,6 @@ class SplitOracleActBCD{
             // scale the margin accordingly
             // margin= size of current set/ precision being optimized
             Float lf=act_k_neg_index[0].first->size()/(prec);
-            std::vector<int> already_present_nodes;
             for (vector<pair<Labels*, Float>>::iterator it =
                     act_k_neg_index.begin(); it != act_k_neg_index.end(); it++) {
                 Labels* k = it->first;
@@ -903,20 +792,9 @@ class SplitOracleActBCD{
                 gradients[i] =0 ;
                 gradients[i]-=lf;
                 margin[i]+=lf;
-                already_present_nodes.clear();
                 for (Labels::iterator it = k->begin();
                         it != k->end(); ++it) {
                     gradients[i] += prod_cache[*it] ;
-                    // find out edge scores also
-                    for(auto node: already_present_nodes){
-                        if(node == *it){
-                            cerr<<"Some Error in Edge Indexing or Finding Constraints:"<<node;
-                            exit(10);
-                        }
-                        int index= get_edge_index(node,*it);
-                        gradients[i]+= ve[index].second;
-                    }
-                    already_present_nodes.push_back(*it);
                 }
                 ++i;
             }
@@ -954,9 +832,16 @@ class SplitOracleActBCD{
                         // push this info into a map
                         // iterate over labels corresponding to this alpha
                         for(auto it:*(act_k_neg_index[i].first)){
-                            if(actives.find(it+1)==actives.end())
-                                actives[it+1]=0.0;
-                            actives[it+1]+=delta_alpha;
+                            if(actives.find(it)==actives.end())
+                                actives[it]=0.0;
+                            actives[it]+=delta_alpha;
+                            // update embedding parameters using this label
+                            for(int j=0;j< ED;++j){
+                                int index=j+K;  // add the offset to seperate it from node parameters   
+                                if(actives.find(index)==actives.end())
+                                    actives[index]=0.0;
+                                actives[index]+=delta_alpha* embeddings[it][j];
+                            }
                         }
                     }
                 changes+=calculate_change(I,actives);
@@ -997,11 +882,9 @@ class SplitOracleActBCD{
     							it2 != actives.end(); it2++) {
     						int k = it2->first;
     						Float delta_alpha = it2->second;
-    						if(k<0){
-    							k=-k;
-    							delta_alpha=-delta_alpha;
-    						}
-    						k--;
+                            // embedding parameters reached
+                            if(k>=K)
+                                break;
                             if( fabs(delta_alpha) < EPS )
                                 continue;
                             //update v, w
@@ -1020,11 +903,9 @@ class SplitOracleActBCD{
     							it2 != actives.end(); it2++) {
     						k = it2->first;
     						Float delta_alpha = it2->second;
-    						if(k<0){
-    						    k=-k;
-    						    delta_alpha=-delta_alpha;
-    						}
-                            k--;
+                            // embedding parameters reached
+                            if(k>=K)
+                                break;
     						if (fabs(delta_alpha) < EPS)
     							continue;
     						//update v, w
@@ -1038,6 +919,24 @@ class SplitOracleActBCD{
     					}
 #endif
                     }
+                    std::map<int, Float>::iterator itx;
+                    // now we need to update the embedding primal parameters
+                    for (itx = actives.lower_bound(K); itx != actives.end();
+                            ++itx) {
+                        // cerr<<"i";
+                        int k = itx->first;
+                        Float delta_alpha = itx->second;
+                        k -= K; // remove the offset
+                        if (fabs(delta_alpha) < EPS)
+                            continue;
+                        pair<Float, Float> vk_Ek = ve[k];
+                        Float vk = vk_Ek.first + delta_alpha;
+                        Float Ek = prox_l1(vk, C2);
+                        Float Ek_old = vk_Ek.second;
+                        Float dw= Ek- Ek_old;
+                        changes+= dw*dw + 2* dw * Ek_old;
+                    }
+
             return -changes;
         }
         void search_active_i_graph(int I, constraints *cons, int prec) {
@@ -1086,6 +985,11 @@ class SplitOracleActBCD{
                         }
 
             		}
+                    // add embedding scores to prod_cache
+                    for(int i=0;i< K;++i){
+                        for(int j=0;j< ED;++j)
+                            prod_cache[i]+= ve[j].second* embeddings[i][j];
+                    }
             		int k=precision<yi->size()?precision:yi->size();
             		int *max_indices;
                     // now find  k(precision@k) maximums from negative ones
@@ -1176,151 +1080,15 @@ class SplitOracleActBCD{
                     }
                     delete[] max_indices;
         }
-        void search_active_i_graph_brute_force(int I, constraints *cons, int prec) {
-                    //prod_cache should be all zero
-                    //select one area from {0, ..., split_up_rate-1}
-                    int S = rand() % split_up_rate;
-                    //compute <xi,wk> for k=1...K
-                    Labels* yi = &(labels->at(I));
-                    SparseVec* xi = data->at(I);
-                    // calculate the scores for each class
-                    memset(prod_cache, 0.0, sizeof(Float) * K);
-                    for (SparseVec::iterator current_index = xi->begin();
-                            current_index < xi->end(); current_index++) {
-                        Float xij = current_index->second;
-                        int j = current_index->first;
-                        vector<int>& wjS = w_hash_nnz_index[j][S];
-                        if (wjS.size() == 0)
-                            continue;
-                        int k = 0, ind = 0;
-            #ifdef USING_HASHVEC
-                        int size_vj0 = size_v[j] - 1;
-            #endif
-                        Float wjk = 0.0;
-                        auto vj = v[j];
-                        for (vector<int>::iterator it2 = wjS.begin(); it2 != wjS.end();
-                                it2++) {
-                            k = *(it2);
-            #ifdef USING_HASHVEC
-                            int index_v = 0;
-                            find_index(vj, index_v, k, size_vj0, hashindices);
-                            wjk = vj[index_v].second.second;
-            #else
-                            wjk = vj[k].second;
-            #endif
-                            if (wjk == 0.0 || inside[k]){
-                                *it2=*(wjS.end()-1);
-                                wjS.erase(wjS.end()-1);
-                                it2--;
-                                continue;
-                            }
-                            inside[k] = true;
-                            prod_cache[k] += wjk * xij;
-                        }
-                        for (vector<int>::iterator it2 = wjS.begin(); it2 != wjS.end(); it2++){
-                            inside[*it2] = false;
-                        }
-
-                    }
-                    int k=precision<yi->size()?precision:yi->size();
-                    int *max_indices;
-                    // now find  k(precision@k) maximums from negative ones
-                    max_indices=new int[K];
-                    for(int i=0;i<K;++i){
-                        max_indices[i]=i;
-                    }
-                    // create a sets to hold the hash current hashes
-                    unordered_set<long long> actives[prec];
-                    //now compute hashes of all the sets in active set
-                    hasher gethash;
-                    int max_elements=-1;
-                    for(int p=0;p<prec;++p){
-                        for (vector<pair<Labels*, Float>>::iterator it =
-                                cons[p].act_k_neg_index.begin();
-                                it != cons[p].act_k_neg_index.end(); ++it) {
-                            long long hash=gethash(*(it->first));
-                            actives[p].insert(hash);
-                        }
-                        for (vector<pair<Labels*, Float>>::iterator it =
-                                cons[p].act_k_pos_index.begin();
-                                it != cons[p].act_k_pos_index.end(); ++it) {
-                            long long hash=gethash(*(it->first));
-                            actives[p].insert(hash);
-                        }
-                    }
-                    max_select=1;
-                    // first find for k=1
-                    int partial_length= yi->size()+ cons[0].act_k_neg_index.size()+ max_select;
-                    partial_length= partial_length<K? partial_length:K;
-                    nth_element(max_indices, max_indices+partial_length, max_indices+K, ScoreComp(prod_cache));
-                    sort(max_indices, max_indices+partial_length, ScoreComp(prod_cache));
-                    int need=max_select;
-                    for(int i=0;i< partial_length && need !=0 ;++i){
-                        Labels* ybar=new vector<int>(1, max_indices[i]);
-                        long long hash= gethash(*ybar);
-                            if(actives[0].find(hash)==actives[0].end()){
-                                    // add this to active set
-                                cons[0].act_k_neg_index.push_back(make_pair(ybar,0.0));
-                                need--;
-                            }
-                    }
-                    // iterate overall all possible label combinations and check if they are present or not
-                    if(k>=2){
-                        // let use some approximation scheme
-                        // only take top sqrt(K) for searching
-                        for(int i=0;i<K;++i){
-                            max_indices[i]=i;
-                        }   
-                        int partial_length = cons[1].act_k_neg_index.size()
-                                            +cons[1].act_k_pos_index.size()+ ceil(sqrt(K));
-                        partial_length= partial_length<K? partial_length:K;
-                        // find top elements
-                        nth_element(max_indices, max_indices+partial_length, max_indices+K, ScoreComp(prod_cache));
-                        Float max_score=-9999;
-                        Float score;
-                        pair<int,int> max_pair;
-                        vector<int> combination;
-                        for(int i=0;i<partial_length;++i){
-                            for(int j=0;j<i;++j){
-                                combination.clear();
-                                // insert in sorted order
-                                if(max_indices[i]<max_indices[j]){
-                                    combination.push_back(max_indices[i]);
-                                    combination.push_back(max_indices[j]);
-                                }else{
-                                    combination.push_back(max_indices[j]);
-                                    combination.push_back(max_indices[i]);
-                                }
-                                long long hash=gethash(combination);
-                                if(actives[1].find(hash)!= actives[1].end()){
-                                    // compute their scores 
-                                    // and store if it crosses max_score
-                                    score= prod_cache[max_indices[j]]+prod_cache[max_indices[i]];
-                                    int index= get_edge_index(max_indices[i],max_indices[j]);
-                                    score+= ve[index].second;
-                                    if(score>max_score){
-                                        max_pair=make_pair(max_indices[j],max_indices[i]);
-                                        max_score=score;
-                                    }
-                                }
-                            }
-                        }
-                        Labels *ybar=new Labels();
-                        // insert in sort order
-                        if(max_pair.first < max_pair.second){
-                            ybar->push_back(max_pair.first);
-                            ybar->push_back(max_pair.second);
-                        }else{
-                            ybar->push_back(max_pair.second);
-                            ybar->push_back(max_pair.first);             
-                        }
-                        cons[1].act_k_neg_index.push_back(make_pair(ybar,0.0));
-                    }
-                delete[] max_indices;
-        }
 
         //store the best model as well as necessary indices
         void store_best_model(){
+            // save the best edge weights
+            memset(E, 0.0, ED);
+            for(int i=0;i< ED;++i){
+                E[i]=ve[i].second;
+            }
+
 #ifdef USING_HASHVEC
             memset(inside, false, sizeof(bool)*K);
             for (int j = 0; j < D; j++){
@@ -1359,7 +1127,7 @@ class SplitOracleActBCD{
                     inside[k] = false;
                 }
             }
-            best_model = new Model(train, non_split_index, w, size_w, hashindices);
+            best_model = new Model(train, non_split_index, w, size_w, hashindices,E , ED);
 #else
             for (int j = 0; j < D; j++){
                 for (vector<int>::iterator it = non_split_index[j].begin(); it != non_split_index[j].end(); it++){
@@ -1388,7 +1156,7 @@ class SplitOracleActBCD{
                     inside[k] = false;
                 }
             }
-            best_model = new Model(train, non_split_index, w);
+            best_model = new Model(train, non_split_index, w, E, ED);
 #endif		
 /*
             if (best_act_k_index == NULL)
@@ -1396,33 +1164,23 @@ class SplitOracleActBCD{
             for (int i = 0; i < N; i++)
                 best_act_k_index[i] = act_k_index[i];
 */
-            //store the constraints
-            ofstream fout("constraints.txt");
-            // Each line contains the labels for that particular example which are part of active set
-            for(int i=0;i<N;++i){
-            	// first write the positive labels then negative
-            	for(auto elem:cons[i][0].act_k_pos_index){
-            		for(auto label: *(elem.first))
-            			fout<<label<<" ";
-            	}
-            	// now write the negative labels then negative
-            	for(auto elem:cons[i][0].act_k_neg_index){
-            		for(auto label: *(elem.first))
-            			fout<<label<<" ";
-            	}
-            	fout<<"-1"<<endl; // to mark end
-            }
-            fout.close();
-            // save the best edge weights
-            unordered_set<int> already_in;
-            ofstream fout2("edges.txt");
-            memset(E, 0.0, K*(K-1)/2);
-            for(int i=0;i< K*(K-1)/2;++i){
-                E[i]=ve[i].second;
-                fout2<<E[i]<<" ";
-            }
-            fout2<<endl;
-            fout2.close();
+            // //store the constraints
+            // ofstream fout("constraints.txt");
+            // // Each line contains the labels for that particular example which are part of active set
+            // for(int i=0;i<N;++i){
+            // 	// first write the positive labels then negative
+            // 	for(auto elem:cons[i][0].act_k_pos_index){
+            // 		for(auto label: *(elem.first))
+            // 			fout<<label<<" ";
+            // 	}
+            // 	// now write the negative labels then negative
+            // 	for(auto elem:cons[i][0].act_k_neg_index){
+            // 		for(auto label: *(elem.first))
+            // 			fout<<label<<" ";
+            // 	}
+            // 	fout<<"-1"<<endl; // to mark end
+            // }
+            // fout.close();
         }
 
     private:
@@ -1438,6 +1196,7 @@ class SplitOracleActBCD{
         int D; 
         int N;
         int K;
+        int ED;
         // precision@k to optimize for
         int precision;
         int solver;
@@ -1479,7 +1238,8 @@ class SplitOracleActBCD{
         // to store edges
         Float* E;
         pair<Float, Float>* ve;
-
+        // array of vectors to store embeddings
+        vector<Float> *embeddings;
         //for storing best model
         //vector<pair<int, Float>>* best_act_k_index;
         vector<int>* non_split_index;

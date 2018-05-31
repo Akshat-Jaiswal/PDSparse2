@@ -35,34 +35,45 @@ StaticModel* readModel(char* file){
 			model->w[j][r].second = val;
 		}
 	}
-	
+	// read embedding parameters
+	fin >> tmp >> (model->ED);
+	Float val;
+	for(int i=0;i< model-> ED;++i){
+		fin>>val;
+		model->E.push_back(val);
+	}
+	fin.close();
 	delete[] tmp;
 	return model;
 }
 
 int main(int argc, char** argv){
 	
-	if( argc < 1+2 ){
-		cerr << "multiPred [testfile] [model] (-p S <output_file>) (k)" << endl;
+	if( argc < 1+3 ){
+		cerr << "multiPred [embedding_file] [testfile] [model] (-p S <output_file>) (k)" << endl;
         cerr << "\t-p S <output_file>: print top S <label>:<prediction score> pairs to <output_file>, one line for each instance. (default S=0 and no file is generated)" << endl;
         cerr << "\tcompute top k accuracy, default k=1" << endl;
 		exit(0);
 	}
 
-	char* testFile = argv[1];
-	char* modelFile = argv[2];
+	char* embeddingFile = argv[1];
+	char* testFile = argv[2]; 
+	char* modelFile = argv[3];
     char* outFname;
     int S = 0, offset = 0;
-    if (argc > 5 && strcmp(argv[3], "-p") == 0){
-        S = atoi(argv[4]);
-        outFname = argv[5];
+    vector<Float> *embeddings;
+    if (argc > 6 && strcmp(argv[4], "-p") == 0){
+        S = atoi(argv[5]);
+        outFname = argv[6];
         offset = 3;
     }
 	int T = 1;
-	if (argc > 3 + offset){
-		T = atoi(argv[3 + offset]);
+	if (argc > 4 + offset){
+		T = atoi(argv[4 + offset]);
 	}
 	StaticModel* model = readModel(modelFile);
+    // read embeddings
+    embeddings= readEmbeddings(embeddingFile, *(model->label_index_map));
 
     if (T > model->K || S > model->K){
         cerr << "k or S is larger than domain size" << endl;
@@ -91,7 +102,12 @@ int main(int argc, char** argv){
     }
 	for(int i=0;i<prob->N;i++){
 		memset(prod, 0.0, sizeof(Float)*model->K);
-		
+		// initialize all the scores with embedding scores
+		for(int k=0;k<model->K;++k){
+			for(int j=0;j<model->ED;++j){
+				prod[k]+= model->E[j] * embeddings[k][j];
+			}
+		}
 		SparseVec* xi = data->at(i);
 		Labels* yi = &(labels->at(i));
 		int Ti = T;
