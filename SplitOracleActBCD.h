@@ -66,7 +66,7 @@ class SplitOracleActBCD{
             split_up_rate = param->split_up_rate;
             if( speed_up_rate==-1 )
                 speed_up_rate = ceil( min(5.0*D*K/nnz(train->data)/C[0]/log((Float)K), d/10.0) );
-            cerr << "lambda=" << lambda << ", C=";
+            cerr << "lambda=" << lambda << ", C2=" << C2 << ", C=";
             for(int p=0;p< precision;++p)
             	cerr  << C[p] << " ";
             cerr<<endl;

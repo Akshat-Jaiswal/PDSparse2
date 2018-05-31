@@ -400,19 +400,28 @@ class StaticModel{
 
 
 vector<Float>* readEmbeddings(char* fname, map<string,int> &label_index_map){
-	int label;
+	string label;
 	Float val;
 	int K, ED;
 	ifstream fin(fname);
 	vector<Float>* embeddings;
 	// read the first line to know dimensions of embeddings
-	fin>>K>>ED;
+	fin>>K>>ED ;
+	cerr<<K<<" "<<ED<< " " << label_index_map.size()<<endl; 
 	embeddings= new vector<Float>[K-1];
 	// read K-1 line to ignore <unk>
-	for(int i=0;i<K;++i){
+	for(int i=0;i<K-1;++i){
 		fin>>label;
 		// convert label to model label space
-		int index= label_index_map[to_string(label)];
+		if(label_index_map.find(label)==label_index_map.end()){
+			cerr<<i<<" "<<label<<endl;	
+			exit(10);		
+		}
+		int index= label_index_map[label];
+		// if(embeddings[index].size()!=0){
+		// 	cerr<<i<<" "<<label<<" "<<index<<" "<< embeddings[index].size()<<endl;
+		// 	exit(10);
+		// }
 		for(int j=0;j<ED;++j){
 			fin>>val;
 			embeddings[index].push_back(val);

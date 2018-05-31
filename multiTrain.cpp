@@ -119,7 +119,6 @@ int main(int argc, char** argv){
 	Problem* train = new Problem();
 	readData( param->trainFname, train);
 	param->train = train;
-	
 	overall_time -= omp_get_wtime();
 
 	if (param->heldoutFname != NULL){

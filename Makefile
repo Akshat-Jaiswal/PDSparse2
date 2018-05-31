@@ -66,7 +66,7 @@ Mediamill: examples/$$@/
 
 Eur-Lex: examples/$$@/
 	$(eval base := examples/$@/$@)
-	make train_without_hash train_file=$(base).train heldout_file=$(base).heldout test_file=$(base).test lambda="-l 0.001" early_terminate="-e 5"
+	make train_without_hash train_file=$(base).train heldout_file=$(base).heldout embeddings_file=$(base).embeddings test_file=$(base).test lambda="-l 0.001" early_terminate="-e 5"
 
 #multiclass datasets
 sector: examples/$$@/
