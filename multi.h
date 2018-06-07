@@ -483,7 +483,7 @@ void readData(char* fname, Problem* prob)
 		}
 		
 		SparseVec* ins = new SparseVec();
-		//ins->push_back(make_pair(0,1.0));
+		ins->push_back(make_pair(0,1.0));
 
 		for(int i=st;i<tokens.size();i++){
 			vector<string> kv = split(tokens[i],":");

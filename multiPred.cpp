@@ -105,7 +105,7 @@ int main(int argc, char** argv){
 		// initialize all the scores with embedding scores
 		for(int k=0;k<model->K;++k){
 			for(int j=0;j<model->ED;++j){
-				prod[k]+= model->E[j] * embeddings[k][j];
+				prod[k]+= model->E[j] * embeddings[k][j]/ T;
 			}
 		}
 		SparseVec* xi = data->at(i);

@@ -5,6 +5,9 @@ all: multiTrain multiPred
 multiTrain:
 	g++ -fopenmp -g -std=c++11 -O3 -o multiTrain multiTrain.cpp
 
+combine_models:
+	g++ -fopenmp -g -std=c++11 -O3 -o combine_models combine_models.cpp
+
 multiTrainHash:	
 	g++ -fopenmp -g -std=c++11 -O3 -o multiTrainHash multiTrain.cpp -DUSING_HASHVEC
 	
@@ -15,7 +18,7 @@ clean:
 	rm -f multiTrain
 	rm -f multiTrainHash
 	rm -f multiPred
-
+	rm -f combine_models
 #parameters
 
 output_model=model
@@ -110,7 +113,7 @@ imageNet: examples/$$@/
 	make train_with_hash train_file=$(base).train heldout_file=$(base).heldout test_file=$(base).test split_up_rate="-q 3"
 
 train_without_hash: multiTrain multiPred $(train_file) $(heldout_file) $(test_file) $(embeddings_file)
-	rm -f dumps/*
+	rm -f dumps/model*
 	./multiTrain $(cost) $(lambda) $(solver) $(speed_up_rate) $(early_terminate) $(max_iter) $(split_up_rate) $(max_select) $(post_train_iter) $(sample_option) $(misc) -h $(heldout_file) -T $(embeddings_file) $(train_file) $(output_model)
 	@echo "testing model before post solve"
 	./multiPred $(embeddings_file) $(heldout_file) $(output_model) $(top)
@@ -122,7 +125,7 @@ ifneq ($(p), 0)
 endif
 
 train_with_hash: multiTrainHash multiPred $(train_file) $(heldout_file) $(test_file) $(embeddings_file)
-	rm -f dumps/*
+	rm -f dumps/model*
 	./multiTrainHash $(cost) $(lambda) $(solver) $(speed_up_rate) $(early_terminate) $(max_iter) $(split_up_rate) $(max_select) $(post_train_iter) $(sample_option) $(misc) -h $(heldout_file) -T $(embeddings_file) $(train_file) $(output_model)
 	@echo "testing model before post solve"
 	./multiPred $(embeddings_file) $(heldout_file) $(output_model) $(top)

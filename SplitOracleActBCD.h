@@ -316,7 +316,7 @@ class SplitOracleActBCD{
                                     if (actives.find(index) == actives.end()) {
                                         actives[index] = 0;
                                     }
-                                    actives[index] -= delta_alpha* embeddings[*it2][j];
+                                    actives[index] -= delta_alpha* embeddings[*it2][j]/(p+1);
                                 }
 							}
 						}
@@ -339,7 +339,7 @@ class SplitOracleActBCD{
                                     if (actives.find(index) == actives.end()) {
                                         actives[index] = 0;
                                     }
-                                    actives[index] += delta_alpha* embeddings[*it2][j];
+                                    actives[index] += delta_alpha* embeddings[*it2][j]/(p+1);
                                 }
 
 							}
@@ -693,7 +693,10 @@ class SplitOracleActBCD{
                         margin[i]+=lf;
                         gradients[i]+=lf;
                     }
-                    gradients[i] -= prod_cache[*it] ;
+                    if(prec==1)
+                        gradients[i] -= prod[*it] ;
+                    else
+                        gradients[i] -= prod_cache[*it];
                 }
                 ++i;
             }
@@ -747,7 +750,7 @@ class SplitOracleActBCD{
                                 int index=j+K;  // add the offset to seperate it from node parameters   
                                 if(actives.find(index)==actives.end())
                                     actives[index]=0.0;
-                                actives[index]-=delta_alpha* embeddings[it][j];
+                                actives[index]-=delta_alpha* embeddings[it][j]/prec;
                             }
                         }
                     }
@@ -785,6 +788,7 @@ class SplitOracleActBCD{
             // scale the margin accordingly
             // margin= size of current set/ precision being optimized
             Float lf=act_k_neg_index[0].first->size()/(prec);
+            int p=act_k_neg_index[0].first->size();
             for (vector<pair<Labels*, Float>>::iterator it =
                     act_k_neg_index.begin(); it != act_k_neg_index.end(); it++) {
                 Labels* k = it->first;
@@ -794,7 +798,10 @@ class SplitOracleActBCD{
                 margin[i]+=lf;
                 for (Labels::iterator it = k->begin();
                         it != k->end(); ++it) {
-                    gradients[i] += prod_cache[*it] ;
+                    if(p==1)
+                        gradients[i] += prod[*it] ;
+                    else
+                        gradients[i] += prod_cache[*it];
                 }
                 ++i;
             }
@@ -840,7 +847,7 @@ class SplitOracleActBCD{
                                 int index=j+K;  // add the offset to seperate it from node parameters   
                                 if(actives.find(index)==actives.end())
                                     actives[index]=0.0;
-                                actives[index]+=delta_alpha* embeddings[it][j];
+                                actives[index]+=delta_alpha* embeddings[it][j]/p;
                             }
                         }
                     }
@@ -985,18 +992,21 @@ class SplitOracleActBCD{
                         }
 
             		}
-                    // add embedding scores to prod_cache
-                    for(int i=0;i< K;++i){
-                        for(int j=0;j< ED;++j)
-                            prod_cache[i]+= ve[j].second* embeddings[i][j];
-                    }
-            		int k=precision<yi->size()?precision:yi->size();
-            		int *max_indices;
+                    int *max_indices;
                     // now find  k(precision@k) maximums from negative ones
                     max_indices=new int[K];
                     for(int i=0;i<K;++i){
-                    	max_indices[i]=i;
+                        max_indices[i]=i;
                     }
+
+                    // first find for k = 1
+                    for(int i=0;i< K;++i){
+                        for(int j=0;j< ED;++j)
+                            prod_cache[i]+= ve[j].second* embeddings[i][j];
+                        // for lateral use in subsolve
+                        prod[i]=prod_cache[i];
+                    }
+            		int k=precision<yi->size()?precision:yi->size();
                     // create a sets to hold the hash current hashes
                     unordered_set<long long> actives[prec];
                     //now compute hashes of all the sets in active set
@@ -1020,63 +1030,82 @@ class SplitOracleActBCD{
                     }
                     // now need to partial sort on the basis of scores
                     max_select=1;
-                    int partial_length=yi->size()+ max_elements +max_select;
+                    int partial_length=yi->size()+ cons[0].act_k_neg_index.size() +max_select;
                     partial_length= partial_length<K? partial_length:K;
             		nth_element(max_indices, max_indices+partial_length, max_indices+K, ScoreComp(prod_cache));
             		sort(max_indices, max_indices+partial_length, ScoreComp(prod_cache));
 
+                    // first we find for k = 1 only
             		// need flags to indicate set has been added already
             		vector<int> need(prec,max_select);
                     // now declare vectors to store incremental sets
-            		bool terminate=false;
-                    vector<vector<int>> level[k];
-                    for(int i=0;i<partial_length && ! terminate;++i){
-                        // iterate from last level to second
-                        for(int j=k-1;j>0;--j){
-                            //pick elements to j-1 level and append to each j-1 level a[i]
-                            for(auto elem:level[j-1]){
-                                // create a new vector and add it to level j
-                                vector<int> newconfig(elem.begin(),elem.end());
-                                newconfig.push_back(max_indices[i]);
-                                // run the last iteration of insertion sort
-                                // required by hasher that input is sorted
-                                int l= newconfig.size()-2;
-                                while(l>=0 && newconfig[l]>newconfig[l+1]){
-                                	std::swap(newconfig[l],newconfig[l+1]);
-                                	l--;
-                                }
-                                // only add if its not already found
-                                if(need[j]!=0){
-                                    //check if this new configuration is already in set
-                                    // if not then add and break
-                                    long long hash= gethash(newconfig);
-                                    if(actives[j].find(hash)==actives[j].end()){
-                                        Labels* ybar=new vector<int>(newconfig.begin(),newconfig.end());
-                                        // add this to active set
-                                        cons[j].act_k_neg_index.push_back(make_pair(ybar,0.0));
-                                        need[j]--;
-                                    }
-                                    // else do nothing
-                                }
-                                level[j].push_back(newconfig);
-                            }
-                        }
-                        // add these to first level
+                    for(int i=0;i<partial_length && need[0]!=0;++i){
                         vector<int> newconfig(1,max_indices[i]);
-                        if(need[0]!=0){
-                            long long hash= gethash(newconfig);
-                                if(actives[0].find(hash)==actives[0].end()){
-                                    Labels* ybar=new vector<int>(newconfig.begin(),newconfig.end());
-                                        // add this to active set
-                                    cons[0].act_k_neg_index.push_back(make_pair(ybar,0.0));
-                                    need[0]--;
-                                }
+                        long long hash= gethash(newconfig);
+                        if(actives[0].find(hash)==actives[0].end()){
+                            Labels* ybar=new vector<int>(newconfig.begin(),newconfig.end());
+                                // add this to active set
+                            cons[0].act_k_neg_index.push_back(make_pair(ybar,0.0));
+                            need[0]--;
                         }
-                        level[0].push_back(newconfig);
-                        // check if all the sets of size 1-k have been found
-                        terminate=true;
-                        for(auto e:need)
-                        	terminate &= e==0;
+                    }
+                    // now for k =2 we modify the scores we added to prod_cache
+                    if(k>=2){
+                        // substract half as half is already added to them
+                        for(int i=0;i< K;++i){
+                            for(int j=0;j< ED;++j)
+                                prod_cache[i]-= ve[j].second* embeddings[i][j]/2;
+                        }
+                        // do the usual growing sets algorithm
+                        // sort using the new scores
+                        int partial_length=yi->size()+ max_elements +max_select;
+                        partial_length= partial_length<K? partial_length:K;
+                        nth_element(max_indices, max_indices+partial_length, max_indices+K, ScoreComp(prod_cache));
+                        sort(max_indices, max_indices+partial_length, ScoreComp(prod_cache));
+
+                        bool terminate=false;
+                        vector<vector<int>> level[k];
+                        for(int i=0;i<partial_length && ! terminate;++i){
+                            // iterate from last level to second
+                            for(int j=k-1;j>0;--j){
+                                //pick elements to j-1 level and append to each j-1 level a[i]
+                                for(auto elem:level[j-1]){
+                                    // create a new vector and add it to level j
+                                    vector<int> newconfig(elem.begin(),elem.end());
+                                    newconfig.push_back(max_indices[i]);
+                                    // run the last iteration of insertion sort
+                                    // required by hasher that input is sorted
+                                    int l= newconfig.size()-2;
+                                    while(l>=0 && newconfig[l]>newconfig[l+1]){
+                                    	std::swap(newconfig[l],newconfig[l+1]);
+                                    	l--;
+                                    }
+                                    // only add if its not already found
+                                    if(need[j]!=0){
+                                        //check if this new configuration is already in set
+                                        // if not then add and break
+                                        long long hash= gethash(newconfig);
+                                        if(actives[j].find(hash)==actives[j].end()){
+                                            Labels* ybar=new vector<int>(newconfig.begin(),newconfig.end());
+                                            // add this to active set
+                                            cons[j].act_k_neg_index.push_back(make_pair(ybar,0.0));
+                                            need[j]--;
+                                        }
+                                        // else do nothing
+                                    }
+                                    level[j].push_back(newconfig);
+                                }
+                            }
+                            // add these to first level
+                            vector<int> newconfig(1,max_indices[i]);
+                            // no longer need to check for first level
+                            // simply add it to the first level
+                            level[0].push_back(newconfig);
+                            // check if all the sets of size 1-k have been found
+                            terminate=true;
+                            for(auto e:need)
+                            	terminate &= e==0;
+                        }
                     }
                     delete[] max_indices;
         }
